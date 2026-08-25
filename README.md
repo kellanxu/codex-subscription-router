@@ -54,8 +54,8 @@ Codex Subscription Router.app
 | 组件 | 支持值 |
 | --- | --- |
 | 平台 | Apple silicon Mac |
-| 官方 ChatGPT 版本 | `26.818.41509` |
-| 官方 bundle build | `6962` |
+| 官方 ChatGPT 版本 | `26.818.61809` |
+| 官方 bundle build | `7019` |
 | Go | 1.26 或更高 |
 | Node.js | 22.12 或更高 |
 
@@ -178,6 +178,17 @@ python3 scripts/patch_app.py --force
 重建前退出 Router 和 Computer Use helper。已有应用会移动到 `~/.codex-mux/backups` 下的时间戳目录；账号状态和凭据存放在 app bundle 外，会继续保留。新版本通过 smoke test 后，再手动处理旧备份。
 
 每个 macOS 用户都需要单独构建。生成的 bundle 含有用户专属 helper 和 socket 路径，不适合直接搬运或重新分发。
+
+### 自动安全更新
+
+`scripts/update_guard.py` 会读取官方 ChatGPT 的 version、build 与 ASAR 哈希。已知兼容版本只会在 Router 和 Computer Use helper 均未运行时自动完成全量检查、备份、重建与签名验证；未知版本会保留当前 Router 并停止安装。
+
+```sh
+python3 scripts/update_guard.py check --sync-repo
+python3 scripts/update_guard.py apply --sync-repo --launch
+```
+
+完整状态机与无人值守边界见 [自动更新说明](docs/UPDATE-AUTOMATION.md)。
 
 ## 本地数据与安全
 

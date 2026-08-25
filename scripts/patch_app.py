@@ -47,6 +47,10 @@ OPENAI_INTERNAL_TEAM_IDENTIFIER = "HX7739G8FX"
 OPENAI_DISTRIBUTION_TEAM_IDENTIFIER = "2DC432GLL2"
 TESTED_SOURCE_BUILDS = {
     (
+        "26.818.61809",
+        "7019",
+    ): "76bbcdc2a4a2d77cfe03904a6537d0a655f9892f27a8925e3a6c7b613801d4cf",
+    (
         "26.818.41509",
         "6962",
     ): "8eb91bd9efbf9a4dd04b9b0afdbfcb4e0bab5da18c1919ad74ca327c00c7e791",
@@ -270,6 +274,14 @@ def replace_same_length_identifier(
     if count:
         path.write_bytes(data.replace(original_bytes, replacement_bytes))
     return count
+
+
+def select_unique_anchor(text: str, anchors: tuple[str, ...], error: str) -> str:
+    """Return the one exact supported-build anchor present in *text*."""
+    matches = [anchor for anchor in anchors if text.count(anchor) == 1]
+    if len(matches) != 1:
+        raise RuntimeError(error)
+    return matches[0]
 
 
 def computer_use_package(app: Path) -> Path:
@@ -791,50 +803,72 @@ def patch_renderer(extracted: Path, token: str) -> None:
     component = (PROJECT_ROOT / "ui" / "account-menu.js").read_text(encoding="utf-8")
     component = component.replace("__CODEX_MUX_CONTROL_PORT__", str(CONTROL_PORT))
     component = component.replace("__CODEX_MUX_CONTROL_TOKEN__", token)
-    component_anchor = (
-        "function Oql(e){let t=(0,Nql.c)(253),{sidebarFooter:n,triggerButton:r}=e"
+    component_anchor = select_unique_anchor(
+        bundle,
+        (
+            "function Oql(e){let t=(0,Nql.c)(253),{sidebarFooter:n,triggerButton:r}=e",
+            "function Aql(e){let t=(0,Fql.c)(253),{sidebarFooter:n,triggerButton:r}=e",
+        ),
+        "could not find the native ChatGPT profile menu component",
     )
-    if bundle.count(component_anchor) != 1:
-        raise RuntimeError("could not find the native ChatGPT profile menu component")
     bundle = bundle.replace(component_anchor, component + "\n" + component_anchor, 1)
 
-    plugin_rpc_mapping_anchors = (
-        "sendRequest(`app/list`,{cursor:i,limit:W5r,forceRefetch:t},{trace:a})",
+    plugin_rpc_mapping_anchor_groups = (
+        (
+            "sendRequest(`app/list`,{cursor:i,limit:W5r,forceRefetch:t},{trace:a})",
+            "sendRequest(`app/list`,{cursor:i,limit:K5r,forceRefetch:t},{trace:a})",
+        ),
         "sendRequest(`app/installed`,t?{forceRefresh:!0}:{})",
-        "zg(e,n).sendRequest(`app/read`,{appIds:t})",
+        (
+            "zg(e,n).sendRequest(`app/read`,{appIds:t})",
+            "Lg(e,n).sendRequest(`app/read`,{appIds:t})",
+        ),
         "t.sendRequest(`mcpServer/oauth/login`,e)",
         "listMcpServers(e,t){let n=JSON.stringify({options:t,params:e})",
         "let i=this.sendRequest(`mcpServerStatus/list`,e,t);",
     )
-    for mapping_anchor in plugin_rpc_mapping_anchors:
-        if bundle.count(mapping_anchor) != 1:
-            raise RuntimeError(
-                "could not verify the native Plugins request-to-RPC mapping"
-            )
+    for mapping_anchor_group in plugin_rpc_mapping_anchor_groups:
+        candidates = (
+            mapping_anchor_group
+            if isinstance(mapping_anchor_group, tuple)
+            else (mapping_anchor_group,)
+        )
+        select_unique_anchor(
+            bundle,
+            candidates,
+            "could not verify the native Plugins request-to-RPC mapping",
+        )
 
-    app_server_request_anchor = (
-        "async sendRequest(e,t,n){if(this.dispatchMessage==null)throw Error("
-        "`AppServerRequestClient is missing a message dispatcher`);"
-        "return e===`config/read`?this.sendConfigReadRequest(t,n):"
-        "this.enqueueRequest(e,t,e===`plugin/list`&&n?.timeoutMs==null?"
-        "{...n,timeoutMs:CFt}:n)}"
+    app_server_request_anchor = select_unique_anchor(
+        bundle,
+        tuple(
+            "async sendRequest(e,t,n){if(this.dispatchMessage==null)throw Error("
+            "`AppServerRequestClient is missing a message dispatcher`);"
+            "return e===`config/read`?this.sendConfigReadRequest(t,n):"
+            "this.enqueueRequest(e,t,e===`plugin/list`&&n?.timeoutMs==null?"
+            f"{{...n,timeoutMs:{timeout_name}}}:n)}}"
+            for timeout_name in ("CFt", "DFt")
+        ),
+        "could not find the native app-server request bridge",
     )
-    if bundle.count(app_server_request_anchor) != 1:
-        raise RuntimeError("could not find the native app-server request bridge")
     bundle = bundle.replace(
         app_server_request_anchor,
-        "async sendRequest(e,t,n){t=codexMuxScopePluginRequest(e,t);"
-        "if(this.dispatchMessage==null)throw Error("
-        "`AppServerRequestClient is missing a message dispatcher`);"
-        "return e===`config/read`?this.sendConfigReadRequest(t,n):"
-        "this.enqueueRequest(e,t,e===`plugin/list`&&n?.timeoutMs==null?"
-        "{...n,timeoutMs:CFt}:n)}",
+        app_server_request_anchor.replace(
+            "async sendRequest(e,t,n){",
+            "async sendRequest(e,t,n){t=codexMuxScopePluginRequest(e,t);",
+            1,
+        ),
         1,
     )
 
-    profile_query_anchor = "let e=await B_.safeGet(`/wham/profiles/me`)"
-    if bundle.count(profile_query_anchor) != 1:
-        raise RuntimeError("could not find the native profile stats request")
+    profile_query_anchor = select_unique_anchor(
+        bundle,
+        (
+            "let e=await B_.safeGet(`/wham/profiles/me`)",
+            "let e=await R_.safeGet(`/wham/profiles/me`)",
+        ),
+        "could not find the native profile stats request",
+    )
     bundle = bundle.replace(
         profile_query_anchor,
         "let e=await codexMuxProfileData("
@@ -842,55 +876,96 @@ def patch_renderer(extracted: Path, token: str) -> None:
         1,
     )
 
-    native_usage_modal_anchor = (
-        "function Bsc(e){let t=(0,Vsc.c)(20),{defaultResetCreditsOpen:n"
+    native_usage_modal_anchor = select_unique_anchor(
+        bundle,
+        (
+            "function Bsc(e){let t=(0,Vsc.c)(20),{defaultResetCreditsOpen:n",
+            "function Ssc(e){let t=(0,Tsc.c)(96),{availableCount:n,"
+            "availableResetCredits:r,defaultResetCreditsOpen:i",
+        ),
+        "could not find the native Usage modal component",
     )
-    if bundle.count(native_usage_modal_anchor) != 1:
-        raise RuntimeError("could not find the native Usage modal component")
     bundle = bundle.replace(
         native_usage_modal_anchor,
-        "function Bsc(e){CodexMuxUseResetAccountState();"
-        "let t=(0,Vsc.c)(20),{defaultResetCreditsOpen:n",
+        native_usage_modal_anchor.replace(
+            "{let t=", "{CodexMuxUseResetAccountState();let t=", 1
+        ),
         1,
     )
 
-    reset_query_anchor = (
-        "function TCa(){let e=(0,MV.c)(1),t;return "
-        "e[0]===Symbol.for(`react.memo_cache_sentinel`)?"
-        "(t={queryKey:[`rate-limit-reset-credits`],queryFn:ECa,"
-        "refetchInterval:jp.ONE_MINUTE,staleTime:jp.FIVE_SECONDS},e[0]=t):"
-        "t=e[0],It(t)}"
+    reset_query_anchor = select_unique_anchor(
+        bundle,
+        (
+            "function TCa(){let e=(0,MV.c)(1),t;return "
+            "e[0]===Symbol.for(`react.memo_cache_sentinel`)?"
+            "(t={queryKey:[`rate-limit-reset-credits`],queryFn:ECa,"
+            "refetchInterval:jp.ONE_MINUTE,staleTime:jp.FIVE_SECONDS},e[0]=t):"
+            "t=e[0],It(t)}",
+            "function DCa(){let e=(0,MV.c)(1),t;return "
+            "e[0]===Symbol.for(`react.memo_cache_sentinel`)?"
+            "(t={queryKey:[`rate-limit-reset-credits`],queryFn:OCa,"
+            "refetchInterval:Ap.ONE_MINUTE,staleTime:Ap.FIVE_SECONDS},e[0]=t):"
+            "t=e[0],It(t)}",
+        ),
+        "could not find the native reset-credit query",
     )
-    if bundle.count(reset_query_anchor) != 1:
-        raise RuntimeError("could not find the native reset-credit query")
+    reset_query_name = "TCa" if reset_query_anchor.startswith("function TCa") else "DCa"
+    reset_query_fn = "ECa" if reset_query_name == "TCa" else "OCa"
+    reset_timer = "jp" if reset_query_name == "TCa" else "Ap"
     bundle = bundle.replace(
         reset_query_anchor,
-        "function TCa(){let e=window.__codexMuxResetAccountId;return It({"
+        f"function {reset_query_name}(){{let e=window.__codexMuxResetAccountId;"
+        "return It({"
         "queryKey:[`rate-limit-reset-credits`,e??`primary`],"
-        "queryFn:e?()=>codexMuxRateLimitResets(e):ECa,"
-        "refetchInterval:jp.ONE_MINUTE,staleTime:jp.FIVE_SECONDS})}",
+        f"queryFn:e?()=>codexMuxRateLimitResets(e):{reset_query_fn},"
+        f"refetchInterval:{reset_timer}.ONE_MINUTE,"
+        f"staleTime:{reset_timer}.FIVE_SECONDS}})}}",
         1,
     )
 
-    reset_mutation_anchor = (
-        "function DCa(){let e=(0,MV.c)(3),t=ct(),n=vb(),r;return "
-        "e[0]!==n||e[1]!==t?(r={mutationFn:OCa,onSuccess:(e,r)=>{"
-        "let{creditId:i}=r,a=e.code;if(a===`reset`||a===`already_redeemed`){"
-        "let n=e.code===`reset`?e.credit?.id??i:i;"
-        "t.setQueryData([`rate-limit-reset-credits`],e=>ZSa(e,a,n))}"
-        "Promise.all([n([`rate-limit-status`]),n([`rate-limit-reset-credits`])])}},"
-        "e[0]=n,e[1]=t,e[2]=r):r=e[2],Qt(r)}"
+    reset_mutation_anchor = select_unique_anchor(
+        bundle,
+        (
+            "function DCa(){let e=(0,MV.c)(3),t=ct(),n=vb(),r;return "
+            "e[0]!==n||e[1]!==t?(r={mutationFn:OCa,onSuccess:(e,r)=>{"
+            "let{creditId:i}=r,a=e.code;if(a===`reset`||a===`already_redeemed`){"
+            "let n=e.code===`reset`?e.credit?.id??i:i;"
+            "t.setQueryData([`rate-limit-reset-credits`],e=>ZSa(e,a,n))}"
+            "Promise.all([n([`rate-limit-status`]),n([`rate-limit-reset-credits`])])}},"
+            "e[0]=n,e[1]=t,e[2]=r):r=e[2],Qt(r)}",
+            "function kCa(){let e=(0,MV.c)(3),t=ct(),n=gb(),r;return "
+            "e[0]!==n||e[1]!==t?(r={mutationFn:ACa,onSuccess:(e,r)=>{"
+            "let{creditId:i}=r,a=e.code;if(a===`reset`||a===`already_redeemed`){"
+            "let n=e.code===`reset`?e.credit?.id??i:i;"
+            "t.setQueryData([`rate-limit-reset-credits`],e=>$Sa(e,a,n))}"
+            "Promise.all([n([`rate-limit-status`]),n([`rate-limit-reset-credits`])])}},"
+            "e[0]=n,e[1]=t,e[2]=r):r=e[2],Qt(r)}",
+        ),
+        "could not find the native reset-credit mutation",
     )
-    if bundle.count(reset_mutation_anchor) != 1:
-        raise RuntimeError("could not find the native reset-credit mutation")
+    if reset_mutation_anchor.startswith("function DCa"):
+        mutation_function, invalidate_function, consume_function, updater = (
+            "DCa",
+            "vb",
+            "OCa",
+            "ZSa",
+        )
+    else:
+        mutation_function, invalidate_function, consume_function, updater = (
+            "kCa",
+            "gb",
+            "ACa",
+            "$Sa",
+        )
     bundle = bundle.replace(
         reset_mutation_anchor,
-        "function DCa(){let e=ct(),t=vb(),n=window.__codexMuxResetAccountId,"
+        f"function {mutation_function}(){{let e=ct(),t={invalidate_function}(),"
+        "n=window.__codexMuxResetAccountId,"
         "r=[`rate-limit-reset-credits`,n??`primary`];return Qt({"
-        "mutationFn:n?i=>codexMuxConsumeRateLimitReset(n,i):OCa,"
+        f"mutationFn:n?i=>codexMuxConsumeRateLimitReset(n,i):{consume_function},"
         "onSuccess:(n,i)=>{let{creditId:a}=i,o=n.code;"
         "if(o===`reset`||o===`already_redeemed`){let t=o===`reset`?"
-        "n.credit?.id??a:a;e.setQueryData(r,e=>ZSa(e,o,t))}"
+        f"n.credit?.id??a:a;e.setQueryData(r,e=>{updater}(e,o,t))}}"
         "Promise.all([t([`rate-limit-status`]),t(r)])}})}",
         1,
     )
@@ -904,15 +979,20 @@ def patch_renderer(extracted: Path, token: str) -> None:
         1,
     )
 
-    usage_header_anchor = (
-        "let _e;t[46]===he?_e=t[47]:"
-        "(_e=(0,u0.jsxs)(IR,{children:[he,ge]}),t[46]=he,t[47]=_e);"
+    usage_header_anchor = select_unique_anchor(
+        bundle,
+        (
+            "let _e;t[46]===he?_e=t[47]:"
+            "(_e=(0,u0.jsxs)(IR,{children:[he,ge]}),t[46]=he,t[47]=_e);",
+            "let _e;t[46]===he?_e=t[47]:"
+            "(_e=(0,u0.jsxs)(LR,{children:[he,ge]}),t[46]=he,t[47]=_e);",
+        ),
+        "could not find the native Usage sheet header",
     )
-    if bundle.count(usage_header_anchor) != 1:
-        raise RuntimeError("could not find the native Usage sheet header")
+    usage_header_component = "IR" if "(IR," in usage_header_anchor else "LR"
     bundle = bundle.replace(
         usage_header_anchor,
-        "let _e=(0,u0.jsxs)(IR,{children:[he,ge,"
+        f"let _e=(0,u0.jsxs)({usage_header_component},{{children:[he,ge,"
         "window.__codexMuxResetAccountSelector??null]});",
         1,
     )
@@ -1350,6 +1430,20 @@ def patch_app(
             COMPUTER_USE_BUNDLE_IDENTIFIER,
             team_identifier,
         )
+
+        with source_plist.open("rb") as handle:
+            current_source_info = plistlib.load(handle)
+        current_source_hash = hashlib.sha256(source_asar.read_bytes()).hexdigest()
+        if (
+            str(current_source_info.get("CFBundleShortVersionString", "unknown"))
+            != source_version
+            or str(current_source_info.get("CFBundleVersion", "unknown"))
+            != source_build
+            or current_source_hash != source_asar_hash
+        ):
+            raise RuntimeError(
+                "official source changed during the build; staged apps were not installed"
+            )
 
         backup_suffix = time.strftime("%Y%m%d-%H%M%S")
         backup_directory = DEFAULT_STATE_ROOT / "backups" / backup_suffix

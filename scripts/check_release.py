@@ -28,6 +28,7 @@ REQUIRED_FILES = (
     "docs/RELEASING.md",
     "docs/SECURITY-MODEL.md",
     "docs/SMOKE-TEST.md",
+    "docs/UPDATE-AUTOMATION.md",
     "package-lock.json",
     "package.json",
 )

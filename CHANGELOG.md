@@ -11,6 +11,10 @@ this project uses [Semantic Versioning](https://semver.org/).
   rebuilds, recoverable upgrades, and automatic launch.
 - Reset-aware routing that prioritizes weekly quota at risk of expiring and
   gives a bounded boost to subscriptions with banked usage resets.
+- Guarded update automation that detects official ChatGPT updates, defers while
+  the Router is active, and installs only exact approved version/build/hash
+  fingerprints after the full verification suite passes.
+- Compatibility with official ChatGPT Desktop `26.818.61809` (build `7019`).
 
 ## [0.1.0] - 2026-08-15
 

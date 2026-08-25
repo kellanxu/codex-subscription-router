@@ -79,8 +79,8 @@ Codex Subscription Router currently targets:
 | Component | Supported value |
 | --- | --- |
 | Platform | macOS on Apple silicon |
-| Official ChatGPT version | `26.818.41509` |
-| Official bundle build | `6962` |
+| Official ChatGPT version | `26.818.61809` |
+| Official bundle build | `7019` |
 | Go | 1.26 or newer |
 | Node.js | 22.12 or newer |
 
@@ -239,6 +239,21 @@ intact. Delete old backups manually after the rebuilt app passes the smoke test.
 
 Build separately for each macOS user. Generated bundles contain user-specific
 helper and socket paths and are not relocatable or intended for redistribution.
+
+### Guarded automatic updates
+
+`scripts/update_guard.py` fingerprints the official ChatGPT version, build, and
+ASAR. An exact approved build is verified, backed up, rebuilt, and signature-
+checked only while the Router and Computer Use helper are inactive. An unknown
+build preserves the currently working Router and stops before installation.
+
+```sh
+python3 scripts/update_guard.py check --sync-repo
+python3 scripts/update_guard.py apply --sync-repo --launch
+```
+
+See [guarded update automation](docs/UPDATE-AUTOMATION.md) for the state machine
+and unattended-operation boundaries.
 
 ## Local data and security
 

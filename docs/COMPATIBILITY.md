@@ -6,12 +6,12 @@ stops instead of applying a partial patch.
 
 ## Release 0.1.0
 
-| Component | Tested value |
-| --- | --- |
-| Official ChatGPT version | `26.818.41509` |
-| Official bundle build | `6962` |
-| `app.asar` SHA-256 | `8eb91bd9efbf9a4dd04b9b0afdbfcb4e0bab5da18c1919ad74ca327c00c7e791` |
-| Architecture | Apple silicon (`arm64`) |
+### Tested official builds
+
+| Official ChatGPT version | Bundle build | `app.asar` SHA-256 | Architecture |
+| --- | --- | --- | --- |
+| `26.818.61809` | `7019` | `76bbcdc2a4a2d77cfe03904a6537d0a655f9892f27a8925e3a6c7b613801d4cf` | Apple silicon (`arm64`) |
+| `26.818.41509` | `6962` | `8eb91bd9efbf9a4dd04b9b0afdbfcb4e0bab5da18c1919ad74ca327c00c7e791` | Apple silicon (`arm64`) |
 
 A different official version may work when all anchors remain identical, but
 it is unverified. The patcher rejects a version, build, or ASAR hash mismatch by
