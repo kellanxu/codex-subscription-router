@@ -2,12 +2,13 @@ const CODEX_MUX_THREAD_API = "http://127.0.0.1:__CODEX_MUX_CONTROL_PORT__/v1";
 const CODEX_MUX_THREAD_TOKEN = "__CODEX_MUX_CONTROL_TOKEN__";
 
 function CodexMuxThreadSubscription() {
-  const route = Xn(ec);
+  const route = $t(ge);
   const threadId =
     route.value.routeKind === "local-thread" ? route.value.conversationId : null;
-  const [account, setAccount] = Fk.useState(null);
+  const CodexMuxThreadReact = t(io(), 1);
+  const [account, setAccount] = CodexMuxThreadReact.useState(null);
 
-  Fk.useEffect(() => {
+  CodexMuxThreadReact.useEffect(() => {
     let active = true;
     if (!threadId) {
       setAccount(null);
@@ -61,23 +62,23 @@ function CodexMuxThreadSubscription() {
   const remaining = weekly == null ? null : Math.max(0, 100 - weekly.usedPercent);
   const depleted = remaining === 0;
   const AccountAvatar = globalThis.CodexMuxAccountAvatar;
-  return (0, TE.jsx)(Z.Section, {
+  return (0, GT.jsx)(Z.Section, {
     sectionKey: "codex-mux-subscription",
     title: "Subscription",
-    children: (0, TE.jsxs)("div", {
+    children: (0, GT.jsxs)("div", {
       className: "flex min-h-9 items-center justify-between gap-3 py-1 text-sm",
       children: [
-        (0, TE.jsxs)("div", {
+        (0, GT.jsxs)("div", {
           className: "flex min-w-0 items-center gap-2",
           children: [
             AccountAvatar
-              ? (0, TE.jsx)(AccountAvatar, {
+              ? (0, GT.jsx)(AccountAvatar, {
                   imageUrl: account.profileImageUrl,
                   label: account.label,
                   className: "size-5 shrink-0",
                 })
               : null,
-            (0, TE.jsx)("span", {
+            (0, GT.jsx)("span", {
               className: "truncate text-token-text-primary",
               children: account.planLabel
                 ? `${account.label} · ${account.planLabel}`
@@ -85,7 +86,7 @@ function CodexMuxThreadSubscription() {
             }),
           ],
         }),
-        (0, TE.jsx)("span", {
+        (0, GT.jsx)("span", {
           className: "shrink-0 tabular-nums text-token-description-foreground",
           children:
             remaining == null

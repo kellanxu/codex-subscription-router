@@ -31,6 +31,69 @@ function mainWindow() {
   return windows.find((window) => window.isVisible()) ?? windows[0];
 }
 
+async function clickProfileMenu(window) {
+  return window.webContents.executeJavaScript(`(() => {
+    const target=document.querySelector(
+      'button[aria-label="Open profile menu"],button[aria-label="打开个人资料菜单"]',
+    );
+    if(!target)return false;
+    target.click();
+    return true;
+  })()`);
+}
+
+async function submitRoutingProbe(window, step, startNewChat) {
+  const expected = `ROUTER_E2E_STEP_${step}_OK`;
+  const prompt = `Desktop subscription router E2E step ${step}. Reply with ${expected} only.`;
+  if (startNewChat) {
+    const started = await window.webContents.executeJavaScript(`(() => {
+      const target=document.querySelector(
+        'button[aria-label="New chat"],button[aria-label="新对话"]',
+      );
+      if(!target)return false;
+      target.click();
+      return true;
+    })()`);
+    if (!started) throw new Error("Could not start the routing test chat");
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+  const filled = await window.webContents.executeJavaScript(`(() => {
+    const prompt=${JSON.stringify(prompt)};
+    const composer=document.querySelector('textarea[placeholder]')??document.querySelector('[contenteditable="true"]');
+    if(!composer)return false;
+    composer.focus();
+    if(composer instanceof HTMLTextAreaElement){
+      const setter=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set;
+      setter.call(composer,prompt);
+    }else{
+      composer.textContent=prompt;
+    }
+    composer.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:prompt}));
+    return true;
+  })()`);
+  if (!filled) throw new Error("Could not fill the routing test composer");
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  const submitted = await window.webContents.executeJavaScript(`(() => {
+    const target=[...document.querySelectorAll('button')].find(button=>{
+      const label=button.getAttribute('aria-label');
+      return (label==='Send'||label==='发送')&&!button.disabled;
+    });
+    if(!target)return false;
+    target.click();
+    return true;
+  })()`);
+  if (!submitted) throw new Error("Could not submit the routing test turn");
+  const completed = await window.webContents.executeJavaScript(`new Promise((resolve) => {
+    const expected=${JSON.stringify(expected)};
+    const visible=()=>(document.body?.innerText??'').includes(expected);
+    if(visible()){resolve(true);return;}
+    const observer=new MutationObserver(()=>{if(visible()){observer.disconnect();resolve(true);}});
+    observer.observe(document.body,{childList:true,subtree:true,characterData:true});
+    setTimeout(()=>{observer.disconnect();resolve(false);},90000);
+  })`);
+  if (!completed) throw new Error(`Routing test step ${step} did not complete`);
+}
+
 async function runAction(window, action, delayMs) {
   window.show();
   window.focus();
@@ -38,6 +101,11 @@ async function runAction(window, action, delayMs) {
     const toggled = await window.webContents.executeJavaScript(`(() => { const target=[...document.querySelectorAll('button[aria-label]')].find(element=>{const label=element.getAttribute('aria-label')||'';return label==='Show combined profile stats'||(label.startsWith('Show ')&&label.endsWith(' profile stats'))}); if(!target)return false; target.click(); return true; })()`);
     if (!toggled) throw new Error("Could not toggle a subscription profile");
     await new Promise((resolve) => setTimeout(resolve, Math.max(delayMs, 1_500)));
+    return;
+  }
+  if (action === "routing-first" || action === "routing-second") {
+    await submitRoutingProbe(window, action === "routing-first" ? 1 : 2, action === "routing-first");
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
     return;
   }
   if (action === "plugins-select-second") {
@@ -100,10 +168,9 @@ async function runAction(window, action, delayMs) {
       const settingsPoint = `(() => { const labels=[...document.querySelectorAll('body *')].filter(element=>element.textContent?.trim()==='Settings'); const label=labels.sort((a,b)=>a.children.length-b.children.length)[0]; const target=label?.closest('button,a,[role="menuitem"],[role="button"]')??label; if(!target)return null; const rect=target.getBoundingClientRect(); return {x:Math.round(rect.x+rect.width/2),y:Math.round(rect.y+rect.height/2)}; })()`;
       let point = await window.webContents.executeJavaScript(settingsPoint);
       if (!point) {
-        const profilePoint = await window.webContents.executeJavaScript(`(() => { const target=document.querySelector('button[aria-label="Open profile menu"]'); if(!target)return null; const rect=target.getBoundingClientRect(); return {x:Math.round(rect.x+rect.width/2),y:Math.round(rect.y+rect.height/2)}; })()`);
-        if (!profilePoint) throw new Error("Could not find the profile-menu button");
-        window.webContents.sendInputEvent({ type: "mouseDown", x: profilePoint.x, y: profilePoint.y, button: "left", clickCount: 1 });
-        window.webContents.sendInputEvent({ type: "mouseUp", x: profilePoint.x, y: profilePoint.y, button: "left", clickCount: 1 });
+        if (!(await clickProfileMenu(window))) {
+          throw new Error("Could not find the profile-menu button");
+        }
         await new Promise((resolve) => setTimeout(resolve, 800));
         point = await window.webContents.executeJavaScript(settingsPoint);
       }
@@ -210,10 +277,9 @@ async function runAction(window, action, delayMs) {
         .some(element => element.textContent?.includes('Usage limit resets'))
     )()`);
     if (!usageVisible) {
-      const point = await window.webContents.executeJavaScript(`(() => { const target=document.querySelector('button[aria-label="Open profile menu"]'); if(!target)return null; const rect=target.getBoundingClientRect(); return {x:Math.round(rect.x+rect.width/2),y:Math.round(rect.y+rect.height/2)}; })()`);
-      if (!point) throw new Error("Could not find the profile-menu button");
-      window.webContents.sendInputEvent({ type: "mouseDown", x: point.x, y: point.y, button: "left", clickCount: 1 });
-      window.webContents.sendInputEvent({ type: "mouseUp", x: point.x, y: point.y, button: "left", clickCount: 1 });
+      if (!(await clickProfileMenu(window))) {
+        throw new Error("Could not find the profile-menu button");
+      }
       await new Promise((resolve) => setTimeout(resolve, 350));
       const opened = await window.webContents.executeJavaScript(`(() => { const target=[...document.querySelectorAll('button,[role="menuitem"]')].find(element=>element.textContent?.includes('Usage remaining')); if(!target)return false; target.click(); return true; })()`);
       if (!opened) throw new Error("Could not open the Usage sheet");
@@ -301,10 +367,9 @@ async function runAction(window, action, delayMs) {
   const selector = "button,[role='button'],a";
   let script;
   if (action === "profile") {
-    const point = await window.webContents.executeJavaScript(`(() => { const target=document.querySelector('button[aria-label="Open profile menu"]'); if(!target)return null; const rect=target.getBoundingClientRect(); return {x:Math.round(rect.x+rect.width/2),y:Math.round(rect.y+rect.height/2)}; })()`);
-    if (!point) throw new Error("Could not find the profile-menu button");
-    window.webContents.sendInputEvent({ type: "mouseDown", x: point.x, y: point.y, button: "left", clickCount: 1 });
-    window.webContents.sendInputEvent({ type: "mouseUp", x: point.x, y: point.y, button: "left", clickCount: 1 });
+    if (!(await clickProfileMenu(window))) {
+      throw new Error("Could not find the profile-menu button");
+    }
     await new Promise((resolve) => setTimeout(resolve, delayMs));
     return;
   } else if (action === "quota-thread") {
@@ -394,6 +459,8 @@ function start() {
 	  action !== "usage-confirm" &&
 	  action !== "usage-confirm-final" &&
 	  action !== "usage-select-second" &&
+	  action !== "routing-first" &&
+	  action !== "routing-second" &&
 	  action !== "appshots-open" &&
 	  action !== "appshots-hotkey" &&
 	  action !== "appshots-settings-trigger" &&

@@ -75,7 +75,7 @@ async function codexMuxConsumeRateLimitReset(accountId, input) {
 function CodexMuxUsageModal({
   onClose,
 }) {
-  return (0, d7.jsx)(kxc, {
+  return (0, d7.jsx)(Bsc, {
     defaultResetCreditsOpen: true,
     initialAvailableCount: 0,
     isRateLimitReached: false,
@@ -88,12 +88,12 @@ function CodexMuxUseResetAccountState() {
   const cachedAccounts = (globalThis.__codexMuxConnectedAccounts || []).filter(
     (account) => account.connected && account.enabled,
   );
-  const [accounts, setAccounts] = NIl.useState(cachedAccounts);
-  const [selectedId, setSelectedId] = NIl.useState("primary");
-  const [resetCounts, setResetCounts] = NIl.useState({});
-  const [loading, setLoading] = NIl.useState(cachedAccounts.length === 0);
+  const [accounts, setAccounts] = Pql.useState(cachedAccounts);
+  const [selectedId, setSelectedId] = Pql.useState("primary");
+  const [resetCounts, setResetCounts] = Pql.useState({});
+  const [loading, setLoading] = Pql.useState(cachedAccounts.length === 0);
 
-  const loadAccounts = NIl.useCallback(async () => {
+  const loadAccounts = Pql.useCallback(async () => {
     const result = await codexMuxRequest("/accounts");
     const connected = (result.accounts || []).filter(
       (account) => account.connected && account.enabled,
@@ -118,11 +118,11 @@ function CodexMuxUseResetAccountState() {
     setResetCounts(Object.fromEntries(entries));
   }, []);
 
-  NIl.useEffect(() => {
+  Pql.useEffect(() => {
     loadAccounts().catch(() => setLoading(false));
   }, [loadAccounts]);
 
-  NIl.useEffect(
+  Pql.useEffect(
     () => () => {
       delete window.__codexMuxResetAccountId;
       delete window.__codexMuxSelectedUsageWindows;
@@ -227,16 +227,16 @@ function CodexMuxResetAccountSelector({
 }
 
 function CodexMuxAccountMenu() {
-  const modalScope = Ss(Q);
-  const [accounts, setAccounts] = NIl.useState([]);
-  const [loading, setLoading] = NIl.useState(true);
-  const [busy, setBusy] = NIl.useState(false);
-  const [error, setError] = NIl.useState("");
-  const [login, setLogin] = NIl.useState(null);
-  const [codeCopied, setCodeCopied] = NIl.useState(false);
+  const modalScope = ys(Q);
+  const [accounts, setAccounts] = Pql.useState([]);
+  const [loading, setLoading] = Pql.useState(true);
+  const [busy, setBusy] = Pql.useState(false);
+  const [error, setError] = Pql.useState("");
+  const [login, setLogin] = Pql.useState(null);
+  const [codeCopied, setCodeCopied] = Pql.useState(false);
   const loginAccountId = login?.accountId || null;
 
-  const refresh = NIl.useCallback(async () => {
+  const refresh = Pql.useCallback(async () => {
     try {
       const result = await codexMuxRequest("/accounts");
       const nextAccounts = result.accounts || [];
@@ -252,7 +252,7 @@ function CodexMuxAccountMenu() {
     }
   }, []);
 
-  NIl.useEffect(() => {
+  Pql.useEffect(() => {
     refresh();
     const events = new EventSource(
       `${CODEX_MUX_API}/events?token=${encodeURIComponent(CODEX_MUX_TOKEN)}`,
@@ -283,7 +283,7 @@ function CodexMuxAccountMenu() {
     };
   }, [refresh, loginAccountId]);
 
-  NIl.useEffect(() => {
+  Pql.useEffect(() => {
     if (!login) return;
     const allowEscapeDismissal = (event) => {
       if (event.key !== "Escape") return;
@@ -368,9 +368,9 @@ function CodexMuxAccountMenu() {
   const rows = [];
   rows.push(
     (0, d7.jsx)(
-      rL,
+      mI,
       {
-        LeftIcon: z2,
+        LeftIcon: g0,
         SubText: loading
           ? "Connecting subscriptions…"
           : connected.length === 1
@@ -384,7 +384,7 @@ function CodexMuxAccountMenu() {
               ? `${Math.round(totalRemaining)}%`
               : "–",
         }),
-        onSelect: () => Tz(modalScope, CodexMuxUsageModal, {}),
+        onSelect: () => VR(modalScope, CodexMuxUsageModal, {}),
         children: "Usage remaining",
       },
       "codex-mux-total",
@@ -392,7 +392,7 @@ function CodexMuxAccountMenu() {
   );
   if (connected.length > 0) {
     rows.push(
-      (0, d7.jsx)(lL.Separator, {}, "codex-mux-accounts-separator"),
+      (0, d7.jsx)(bI.Separator, {}, "codex-mux-accounts-separator"),
     );
   }
 
@@ -401,7 +401,7 @@ function CodexMuxAccountMenu() {
     const remaining = weekly == null ? null : Math.max(0, 100 - weekly.usedPercent);
     rows.push(
       (0, d7.jsx)(
-        rL,
+        mI,
         {
           LeftIcon: (iconProps) =>
             (0, d7.jsx)(CodexMuxAccountAvatar, {
@@ -429,7 +429,7 @@ function CodexMuxAccountMenu() {
   if (login) {
     rows.push(
       (0, d7.jsx)(
-        rL,
+        mI,
         {
           LeftIcon: CodexMuxCopyIcon,
           SubText: login.userCode
@@ -448,9 +448,9 @@ function CodexMuxAccountMenu() {
   if (error) {
     rows.push(
       (0, d7.jsx)(
-        rL,
+        mI,
         {
-          LeftIcon: z2,
+          LeftIcon: g0,
           SubText: error,
           tone: "danger",
           allowWrap: true,
@@ -465,7 +465,7 @@ function CodexMuxAccountMenu() {
   if (!loading) {
     rows.push(
       (0, d7.jsx)(
-        rL,
+        mI,
         {
           LeftIcon: CodexMuxPlusIcon,
           onSelect: addSubscription,
@@ -475,7 +475,7 @@ function CodexMuxAccountMenu() {
       ),
     );
   }
-  rows.push((0, d7.jsx)(lL.Separator, {}, "codex-mux-separator"));
+  rows.push((0, d7.jsx)(bI.Separator, {}, "codex-mux-separator"));
   return (0, d7.jsx)(d7.Fragment, { children: rows });
 }
 
@@ -558,8 +558,8 @@ function CodexMuxMaskedEmail({ email }) {
 }
 
 function CodexMuxAccountAvatar({ imageUrl, label, className }) {
-  const [failed, setFailed] = NIl.useState(false);
-  const resolvedImageUrl = jLa(imageUrl || null);
+  const [failed, setFailed] = Pql.useState(false);
+  const resolvedImageUrl = Hja(imageUrl || null);
   if (resolvedImageUrl && !failed) {
     return (0, d7.jsx)("img", {
       src: resolvedImageUrl,
@@ -607,13 +607,13 @@ function CodexMuxOverlappingAvatars({ accounts, size = "size-20" }) {
 }
 
 function CodexMuxProfileAvatarStack({ onSelect }) {
-  const [accounts, setAccounts] = NIl.useState(
+  const [accounts, setAccounts] = Pql.useState(
     globalThis.__codexMuxCombinedProfileAccounts || [],
   );
-  const [selectedId, setSelectedId] = NIl.useState(
+  const [selectedId, setSelectedId] = Pql.useState(
     globalThis.__codexMuxSelectedProfileAccountId || null,
   );
-  NIl.useEffect(() => {
+  Pql.useEffect(() => {
     let live = true;
     codexMuxRequest("/accounts")
       .then((result) => {
@@ -629,7 +629,7 @@ function CodexMuxProfileAvatarStack({ onSelect }) {
       live = false;
     };
   }, []);
-  NIl.useEffect(() => {
+  Pql.useEffect(() => {
     globalThis.__codexMuxSelectedProfileAccountId = null;
     setSelectedId(null);
     onSelect?.();
@@ -684,11 +684,11 @@ function CodexMuxProfileAvatarStack({ onSelect }) {
 }
 
 function CodexMuxPluginScope() {
-  const [accounts, setAccounts] = NIl.useState([]);
-  const [selectedId, setSelectedId] = NIl.useState("primary");
-  const [loading, setLoading] = NIl.useState(true);
+  const [accounts, setAccounts] = Pql.useState([]);
+  const [selectedId, setSelectedId] = Pql.useState("primary");
+  const [loading, setLoading] = Pql.useState(true);
   const queryClient = ct();
-  NIl.useEffect(() => {
+  Pql.useEffect(() => {
     let live = true;
     codexMuxRequest("/accounts")
       .then((result) => {
@@ -708,7 +708,7 @@ function CodexMuxPluginScope() {
     };
   }, []);
 
-  NIl.useEffect(() => {
+  Pql.useEffect(() => {
     globalThis.__codexMuxPluginAccountId = selectedId;
     return () => {
       delete globalThis.__codexMuxPluginAccountId;

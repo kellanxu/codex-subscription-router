@@ -106,7 +106,7 @@ func New(options Options) (*Multiplexer, error) {
 		externalRoutes:       make(map[string]externalRoute),
 		serverRoutes:         make(map[string]serverRequestRoute),
 		events:               make(map[chan Event]struct{}),
-		profileClient:        &http.Client{Timeout: 10 * time.Second},
+		profileClient:        newProfileHTTPClient(),
 		profileCache:         make(map[string]profileCacheEntry),
 		now:                  time.Now,
 		resetCreditsCache:    make(map[string]resetCreditsCacheEntry),
@@ -366,6 +366,14 @@ func (m *Multiplexer) failoverTurn(
 }
 
 func (m *Multiplexer) resumeThreadOnAccount(ctx context.Context, threadID, sourceAccountID, targetAccountID string) error {
+	sourceAccount, ok := m.store.Account(sourceAccountID)
+	if !ok {
+		return fmt.Errorf("source subscription metadata is unavailable")
+	}
+	targetAccount, ok := m.store.Account(targetAccountID)
+	if !ok {
+		return fmt.Errorf("target subscription metadata is unavailable")
+	}
 	source, ok := m.child(sourceAccountID)
 	if !ok {
 		return fmt.Errorf("source subscription is unavailable")
@@ -393,10 +401,18 @@ func (m *Multiplexer) resumeThreadOnAccount(ctx context.Context, threadID, sourc
 	if readResult.Thread.ID == "" || readResult.Thread.Path == "" {
 		return errors.New("existing chat has no resumable history path")
 	}
+	targetRolloutPath, err := copyRolloutToAccountHome(
+		readResult.Thread.Path,
+		sourceAccount.CodexHome,
+		targetAccount.CodexHome,
+	)
+	if err != nil {
+		return fmt.Errorf("stage existing chat history: %w", err)
+	}
 	resumeParams, _ := json.Marshal(map[string]any{
 		"threadId":      threadID,
 		"history":       nil,
-		"path":          readResult.Thread.Path,
+		"path":          targetRolloutPath,
 		"cwd":           readResult.Thread.CWD,
 		"model":         nil,
 		"modelProvider": readResult.Thread.ModelProvider,
