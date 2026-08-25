@@ -2,9 +2,9 @@
 
 **简体中文** | [English](README.en.md)
 
-![真实 Desktop 路由 E2E，左侧私人任务名已打马赛克](screenshots/kellan-router-e2e-mosaic.png)
+![实机多订阅账号菜单](screenshots/kellan-account-menu.png)
 
-> 这是本 fork 的真实 Desktop E2E 截图。左侧项目和任务名称已做不可读的像素马赛克；中央路由测试内容未做内容编辑。
+> 本 fork 的真实 Desktop 截图。点击左下角账号入口即可查看合并额度、套餐和每个订阅的剩余额度；私人项目与任务名称已移除。
 
 在一个独立的 macOS Desktop 应用里，同时使用多个 ChatGPT 订阅。
 
@@ -14,6 +14,8 @@ Codex Subscription Router 会基于官方 ChatGPT.app 创建一份本地独立�
 
 > [!WARNING]
 > 这是一个非官方、依赖特定 ChatGPT Desktop 版本的项目，与 OpenAI 没有隶属或支持关系。请自行审阅代码，并确保使用方式符合每个订阅适用的条款。
+
+![实机多账号合并个人资料](screenshots/kellan-combined-profile.png)
 
 ## 核心能力
 
@@ -163,7 +165,7 @@ macOS 出现 **退出并重新打开** 时按提示操作；没有自动重启�
 
 **Rate-limit reset** 继续使用原生界面，并增加账号选择器。选择账号会同步切换余额，并确保 reset 只消耗对应订阅的额度。
 
-![实机验证的账号感知插件连接](screenshots/kellan-router-plugins.png)
+![实机验证的账号级插件连接](screenshots/kellan-plugin-account-picker.png)
 
 ## 更新或重建
 

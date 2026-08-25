@@ -2,10 +2,11 @@
 
 [简体中文](README.md) | **English**
 
-![Real Desktop routing E2E with private task names mosaicked](screenshots/kellan-router-e2e-mosaic.png)
+![Real multi-subscription account menu](screenshots/kellan-account-menu.png)
 
-> Real Desktop E2E from this fork. Private task and project names in the left
-> sidebar are mosaicked; the routing responses are not content-edited.
+> Real Desktop capture from this fork. Open the bottom-left account menu to see
+> pooled usage, plans, and each subscription's remaining quota. Private project
+> and task names have been removed.
 
 Use multiple ChatGPT subscriptions from one independent macOS desktop app.
 
@@ -22,6 +23,8 @@ binaries or a prebuilt application.
 > This is an unofficial, version-sensitive project. It is not affiliated with
 > or supported by OpenAI. Review the source and ensure your use complies with
 > the terms governing every connected subscription.
+
+![Real combined multi-account profile](screenshots/kellan-combined-profile.png)
 
 ## Highlights
 
@@ -217,7 +220,7 @@ login are scoped to the selected subscription.
 the sheet. Selecting a subscription changes the displayed balance and ensures
 the reset is consumed only for that account.
 
-![Account-scoped plugin connections on the tested Desktop build](screenshots/kellan-router-plugins.png)
+![Account-scoped plugin connections on the tested Desktop build](screenshots/kellan-plugin-account-picker.png)
 
 ## Update or rebuild
 
