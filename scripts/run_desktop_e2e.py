@@ -289,10 +289,9 @@ def main() -> int:
         capture(token, output, "02-account-menu", action="profile")
         capture(token, output, "03-settings-profile", action="settings-profile")
         capture(token, output, "04-profile-toggle", action="profile-toggle")
-        capture(token, output, "05-back-from-profile", action="back-to-app")
-        capture(token, output, "06-settings-plugins", action="settings-plugins")
-        capture(token, output, "07-plugins-secondary", action="plugins-select-second")
-        capture(token, output, "08-back-from-plugins", action="back-to-app")
+        capture(token, output, "05-settings-plugins", action="settings-plugins")
+        capture(token, output, "06-plugins-secondary", action="plugins-select-second")
+        capture(token, output, "07-back-from-plugins", action="back-to-app")
         result["checks"].extend(["account-menu", "profile", "plugins-secondary"])
 
         set_preview(token, "single_depleted", primary["id"])
@@ -300,14 +299,14 @@ def main() -> int:
             token,
             state_root,
             output,
-            "09-primary-to-secondary",
+            "08-primary-to-secondary",
             secondary["id"],
         )
         verify_sticky_turn(
             token,
             state_root,
             output,
-            "10-secondary-sticky",
+            "09-secondary-sticky",
             secondary_thread,
             secondary["id"],
         )
@@ -318,22 +317,22 @@ def main() -> int:
             token,
             state_root,
             output,
-            "11-secondary-to-primary",
+            "10-secondary-to-primary",
             primary["id"],
         )
         verify_sticky_turn(
             token,
             state_root,
             output,
-            "12-primary-sticky",
+            "11-primary-sticky",
             primary_thread,
             primary["id"],
         )
         result["checks"].extend(["secondary-to-primary", "primary-sticky"])
 
         set_preview(token, "clear")
-        capture(token, output, "13-usage", action="usage")
-        capture(token, output, "14-usage-secondary", action="usage-select-second")
+        capture(token, output, "12-usage", action="usage")
+        capture(token, output, "13-usage-secondary", action="usage-select-second")
         result["checks"].append("usage-secondary")
         result["status"] = "passed"
         exit_code = 0
