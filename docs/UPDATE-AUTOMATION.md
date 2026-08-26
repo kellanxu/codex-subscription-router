@@ -54,6 +54,21 @@ the same version/build:
 python3 scripts/update_guard.py record
 ```
 
+Before recording an adapted build, run the signed Desktop E2E against the exact
+candidate. The harness verifies UI account selection, two real routing
+directions, sticky follow-up turns, the native Usage selector, and restoration
+to normal mode with the private bridge closed:
+
+```sh
+python3 scripts/run_desktop_e2e.py \
+  --app "$HOME/Applications/Codex Subscription Router.app" \
+  --helper "$HOME/Applications/Codex Subscription Router Computer Use.app"
+```
+
+An unattended runner must treat a non-zero exit or a `result.json` status other
+than `passed` as a hard stop. It must not record the new baseline, delete the
+previous backup, or push compatibility metadata after an E2E failure.
+
 State is written atomically with mode `0600` to
 `~/.codex-mux/update-guard.json`. OAuth credentials and account state are not
 read or copied by the guard.

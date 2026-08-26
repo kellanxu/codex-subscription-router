@@ -220,7 +220,7 @@ npm run release:check
 
 Go backend 和注入的 renderer 没有运行时第三方依赖；`@electron/asar` 仅用于构建。确定性的 UI preview route 只有在启动时设置 `CODEX_MUX_UI_TESTS=1` 才会启用，并继续要求 control token。
 
-签名应用测试流程见 [SMOKE-TEST.md](docs/SMOKE-TEST.md)。本 fork 最新完成的真实 Desktop 验证见 [E2E-REPORT-2026-08-25.md](docs/E2E-REPORT-2026-08-25.md)。
+签名应用测试流程见 [SMOKE-TEST.md](docs/SMOKE-TEST.md)。本 fork 最新完成的真实 Desktop 双向路由验证见 [E2E-REPORT-2026-08-26.md](docs/E2E-REPORT-2026-08-26.md)。
 
 ## 已知限制
 

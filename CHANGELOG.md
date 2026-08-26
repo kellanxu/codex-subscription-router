@@ -17,6 +17,11 @@ this project uses [Semantic Versioning](https://semver.org/).
 - Compatibility with official ChatGPT Desktop `26.818.61809` (build `7019`).
 - Explicitly authorized detached update handoff with delayed graceful Router
   shutdown, guarded rebuild, and automatic relaunch.
+- A signed Desktop E2E harness covering the account menu, Profile, Plugins,
+  both live routing directions, sticky follow-up turns, the native Usage
+  selector, normal-mode restoration, and private-bridge shutdown.
+- Build `7019` renderer identifier compatibility, including the current native
+  Usage wrapper and localized Settings navigation.
 
 ## [0.1.0] - 2026-08-15
 

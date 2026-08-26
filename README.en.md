@@ -295,7 +295,7 @@ when `CODEX_MUX_UI_TESTS=1` is present at launch and remain token-authenticated.
 
 The signed-app test procedure is in [SMOKE-TEST.md](docs/SMOKE-TEST.md). The
 latest completed run is recorded in
-[E2E-REPORT-2026-08-25.md](docs/E2E-REPORT-2026-08-25.md).
+[E2E-REPORT-2026-08-26.md](docs/E2E-REPORT-2026-08-26.md).
 
 ## Known limitations
 

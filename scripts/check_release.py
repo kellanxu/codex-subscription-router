@@ -25,6 +25,7 @@ REQUIRED_FILES = (
     "docs/ARCHITECTURE.md",
     "docs/COMPATIBILITY.md",
     "docs/E2E-REPORT-0.1.0.md",
+    "docs/E2E-REPORT-2026-08-26.md",
     "docs/RELEASING.md",
     "docs/SECURITY-MODEL.md",
     "docs/SMOKE-TEST.md",
