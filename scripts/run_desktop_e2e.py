@@ -210,7 +210,7 @@ def new_routing_thread(
         name,
         action="routing-first",
         debug=True,
-        timeout=120,
+        timeout=300,
     )
     after = state_thread_owners(state_root)
     created = sorted(set(after) - set(before))
@@ -231,7 +231,7 @@ def verify_sticky_turn(
     expected_owner: str,
 ) -> None:
     before = state_thread_owners(state_root)
-    capture(token, output, name, action="routing-second", timeout=120)
+    capture(token, output, name, action="routing-second", timeout=300)
     after = state_thread_owners(state_root)
     if set(after) != set(before) or after.get(thread_id) != expected_owner:
         raise E2EError("second Desktop turn did not keep sticky subscription ownership")

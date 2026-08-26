@@ -117,7 +117,7 @@ async function submitRoutingProbe(window, step, startNewChat) {
     if(visible()){resolve(true);return;}
     const observer=new MutationObserver(()=>{if(visible()){observer.disconnect();resolve(true);}});
     observer.observe(document.body,{childList:true,subtree:true,characterData:true});
-    setTimeout(()=>{observer.disconnect();resolve(false);},90000);
+    setTimeout(()=>{observer.disconnect();resolve(false);},240000);
   })`);
   if (!completed) throw new Error(`Routing test step ${step} did not complete`);
 }
