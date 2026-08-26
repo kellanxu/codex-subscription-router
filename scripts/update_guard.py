@@ -33,7 +33,7 @@ class GuardError(RuntimeError):
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("check", "apply", "record"))
+    parser.add_argument("command", choices=("check", "apply", "handoff", "record"))
     parser.add_argument("--source", type=Path, default=DEFAULT_SOURCE)
     parser.add_argument("--destination", type=Path, default=DEFAULT_DESTINATION)
     parser.add_argument("--helper", type=Path, default=DEFAULT_HELPER)
@@ -52,6 +52,12 @@ def parse_args() -> argparse.Namespace:
         "--launch",
         action="store_true",
         help="Open the rebuilt Router after a successful guarded update.",
+    )
+    parser.add_argument(
+        "--delay-seconds",
+        type=int,
+        default=90,
+        help="Delay before a detached handoff exits the active Router.",
     )
     return parser.parse_args()
 
@@ -282,6 +288,59 @@ def guarded_apply(args: argparse.Namespace) -> dict[str, Any]:
     return recorded
 
 
+def schedule_handoff(args: argparse.Namespace) -> dict[str, Any]:
+    result = inspect(args.source, args.destination, args.state)
+    if result["decision"] in {"current", "current_unrecorded"}:
+        result["decision"] = "handoff_not_needed"
+        return result
+    if result["decision"] != "supported_update":
+        raise GuardError(f"cannot schedule handoff for {result['decision']}")
+    if args.go_bin is None:
+        raise GuardError("--go-bin is required for a detached update handoff")
+    if args.delay_seconds < 30:
+        raise GuardError("handoff delay must be at least 30 seconds")
+
+    log_directory = args.state.expanduser().resolve().parent / "logs"
+    log_directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(log_directory, 0o700)
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    log_path = log_directory / f"update-handoff-{timestamp}.log"
+    command = [
+        sys.executable,
+        str(ROOT / "scripts" / "update_after_exit.py"),
+        "--destination",
+        str(args.destination.expanduser().resolve()),
+        "--helper",
+        str(args.helper.expanduser().resolve()),
+        "--go-bin",
+        str(args.go_bin.expanduser().resolve()),
+        "--delay-seconds",
+        str(args.delay_seconds),
+    ]
+    log_handle = log_path.open("a", encoding="utf-8")
+    try:
+        process = subprocess.Popen(
+            command,
+            cwd=ROOT,
+            stdin=subprocess.DEVNULL,
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+            close_fds=True,
+        )
+    finally:
+        log_handle.close()
+    result.update(
+        {
+            "decision": "handoff_scheduled",
+            "delay_seconds": args.delay_seconds,
+            "log": str(log_path),
+            "pid": process.pid,
+        }
+    )
+    return result
+
+
 def main() -> int:
     args = parse_args()
     try:
@@ -290,6 +349,8 @@ def main() -> int:
             result = inspect(args.source, args.destination, args.state)
         elif args.command == "record":
             result = record_success(args.source, args.destination, args.helper, args.state)
+        elif args.command == "handoff":
+            result = schedule_handoff(args)
         else:
             result = guarded_apply(args)
         if sync_result is not None:

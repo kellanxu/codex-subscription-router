@@ -190,6 +190,9 @@ python3 scripts/update_guard.py apply --sync-repo --launch
 
 完整状态机与无人值守边界见 [自动更新说明](docs/UPDATE-AUTOMATION.md)。
 
+当前任务正在 Router 内运行、且用户已授权自动退出时，可用 `handoff`
+安排延迟退出、受控更新与重新启动；它只发送正常终止信号，超时后会停止。
+
 ## 本地数据与安全
 
 | 路径 | 用途 |

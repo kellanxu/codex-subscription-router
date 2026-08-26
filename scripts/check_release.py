@@ -31,6 +31,7 @@ REQUIRED_FILES = (
     "docs/UPDATE-AUTOMATION.md",
     "package-lock.json",
     "package.json",
+    "scripts/update_after_exit.py",
 )
 CURATED_SCREENSHOTS = (
     "screenshots/account-menu.png",

@@ -15,6 +15,8 @@ this project uses [Semantic Versioning](https://semver.org/).
   the Router is active, and installs only exact approved version/build/hash
   fingerprints after the full verification suite passes.
 - Compatibility with official ChatGPT Desktop `26.818.61809` (build `7019`).
+- Explicitly authorized detached update handoff with delayed graceful Router
+  shutdown, guarded rebuild, and automatic relaunch.
 
 ## [0.1.0] - 2026-08-15
 

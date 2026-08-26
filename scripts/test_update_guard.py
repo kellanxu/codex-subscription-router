@@ -119,6 +119,32 @@ class UpdateGuardTests(unittest.TestCase):
         self.assertEqual(result["decision"], "deferred_router_active")
         run_command.assert_not_called()
 
+    def test_handoff_requires_supported_update_and_detaches_worker(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            process = mock.Mock(pid=4321)
+            args = Namespace(
+                source=root / "ChatGPT.app",
+                destination=root / "Codex Subscription Router.app",
+                helper=root / guard.DEFAULT_HELPER.name,
+                state=root / "state.json",
+                go_bin=root / "go" / "bin",
+                delay_seconds=90,
+            )
+            inspection = {
+                "decision": "supported_update",
+                "approved": True,
+                "source": {"version": "2", "build": "200"},
+            }
+            with (
+                mock.patch.object(guard, "inspect", return_value=inspection),
+                mock.patch.object(guard.subprocess, "Popen", return_value=process) as popen,
+            ):
+                result = guard.schedule_handoff(args)
+        self.assertEqual(result["decision"], "handoff_scheduled")
+        self.assertEqual(result["pid"], 4321)
+        self.assertTrue(popen.call_args.kwargs["start_new_session"])
+
 
 if __name__ == "__main__":
     unittest.main()

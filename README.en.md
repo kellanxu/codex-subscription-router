@@ -255,6 +255,10 @@ python3 scripts/update_guard.py apply --sync-repo --launch
 See [guarded update automation](docs/UPDATE-AUTOMATION.md) for the state machine
 and unattended-operation boundaries.
 
+If the current task is running inside the Router and the user explicitly
+authorizes an automatic exit, `handoff` schedules a delayed graceful exit,
+guarded update, and relaunch. It stops on timeout and never force-kills the app.
+
 ## Local data and security
 
 | Path | Purpose |

@@ -32,6 +32,17 @@ Router or Computer Use helper is active.
 python3 scripts/update_guard.py apply --sync-repo --launch
 ```
 
+When the user explicitly authorizes the Router to close itself, schedule a
+detached handoff. The command waits 90 seconds so the current task can persist,
+sends `SIGTERM` to the Router and helper, requires both to exit normally, then
+runs the same guarded apply and relaunches the updated app. It never escalates
+to `SIGKILL`.
+
+```sh
+python3 scripts/update_guard.py handoff --sync-repo \
+  --go-bin /path/to/go/bin --launch
+```
+
 If Go is installed outside the unattended environment's `PATH`, pass its bin
 directory with `--go-bin`.
 
