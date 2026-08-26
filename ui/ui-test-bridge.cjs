@@ -170,18 +170,18 @@ async function runAction(window, action, delayMs) {
     return;
   }
   const settingsSections = {
-    "settings-profile": "Profile",
-    "settings-plugins": "Plugins",
-    "settings-appshots": "Appshots",
-    "settings-computer-use": "Computer use",
+    "settings-profile": ["Profile", "个人资料"],
+    "settings-plugins": ["Plugins", "插件"],
+    "settings-appshots": ["Appshots", "应用截图"],
+    "settings-computer-use": ["Computer use", "计算机控制"],
   };
   if (Object.hasOwn(settingsSections, action)) {
-    const section = settingsSections[action];
+    const sectionLabels = settingsSections[action];
     const alreadyInSettings = await window.webContents.executeJavaScript(`(() =>
-      document.body?.innerText?.includes('Back to app')??false
+      ['Back to app','返回应用'].some(label=>document.body?.innerText?.includes(label))
     )()`);
     if (!alreadyInSettings) {
-      const settingsPoint = `(() => { const labels=[...document.querySelectorAll('body *')].filter(element=>element.textContent?.trim()==='Settings'); const label=labels.sort((a,b)=>a.children.length-b.children.length)[0]; const target=label?.closest('button,a,[role="menuitem"],[role="button"]')??label; if(!target)return null; const rect=target.getBoundingClientRect(); return {x:Math.round(rect.x+rect.width/2),y:Math.round(rect.y+rect.height/2)}; })()`;
+      const settingsPoint = `(() => { const expected=['Settings','设置']; const labels=[...document.querySelectorAll('body *')].filter(element=>expected.includes(element.textContent?.trim())); const label=labels.sort((a,b)=>a.children.length-b.children.length)[0]; const target=label?.closest('button,a,[role="menuitem"],[role="button"]')??label; if(!target)return null; const rect=target.getBoundingClientRect(); return {x:Math.round(rect.x+rect.width/2),y:Math.round(rect.y+rect.height/2)}; })()`;
       let point = await window.webContents.executeJavaScript(settingsPoint);
       if (!point) {
         if (!(await clickProfileMenu(window))) {
@@ -196,8 +196,8 @@ async function runAction(window, action, delayMs) {
       await new Promise((resolve) => setTimeout(resolve, 750));
     }
     const settingsWindow = mainWindow() ?? window;
-    const sectionPoint = await settingsWindow.webContents.executeJavaScript(`(() => { const target=[...document.querySelectorAll('body *')].find(element=>element.children.length===0&&element.textContent?.trim()===${JSON.stringify(section)}); if(!target)return null; const rect=target.getBoundingClientRect(); return {x:Math.round(rect.x+rect.width/2),y:Math.round(rect.y+rect.height/2)}; })()`);
-    if (!sectionPoint) throw new Error(`Could not open Settings > ${section}`);
+    const sectionPoint = await settingsWindow.webContents.executeJavaScript(`(() => { const labels=${JSON.stringify(sectionLabels)}; const target=[...document.querySelectorAll('body *')].find(element=>element.children.length===0&&labels.includes(element.textContent?.trim())); if(!target)return null; const rect=target.getBoundingClientRect(); return {x:Math.round(rect.x+rect.width/2),y:Math.round(rect.y+rect.height/2)}; })()`);
+    if (!sectionPoint) throw new Error(`Could not open Settings > ${sectionLabels[0]}`);
     settingsWindow.webContents.sendInputEvent({ type: "mouseDown", x: sectionPoint.x, y: sectionPoint.y, button: "left", clickCount: 1 });
     settingsWindow.webContents.sendInputEvent({ type: "mouseUp", x: sectionPoint.x, y: sectionPoint.y, button: "left", clickCount: 1 });
     await new Promise((resolve) => setTimeout(resolve, Math.max(delayMs, 1_500)));
@@ -403,7 +403,7 @@ async function runAction(window, action, delayMs) {
   } else if (action === "first-thread") {
     script = `(() => { const candidates=[...document.querySelectorAll(${JSON.stringify(selector)})]; const target=candidates.find(element=>element.textContent.includes("Codex, we want to modify ChatGPT.app")); if(!target)return false; target.click(); return true; })()`;
   } else {
-    script = `(() => { const label=[...document.querySelectorAll('body *')].find(element=>element.textContent?.trim()==="Back to app"); const target=label?.closest('button,a,[role="button"]')??label; if(!target)return false; target.click(); return true; })()`;
+    script = `(() => { const labels=['Back to app','返回应用']; const label=[...document.querySelectorAll('body *')].find(element=>labels.includes(element.textContent?.trim())); const target=label?.closest('button,a,[role="button"]')??label; if(!target)return false; target.click(); return true; })()`;
   }
   const clicked = await window.webContents.executeJavaScript(script);
   if (!clicked) throw new Error(`Could not perform UI-test action: ${action}`);
