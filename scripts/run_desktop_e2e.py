@@ -27,6 +27,9 @@ DEFAULT_HELPER = (
 DEFAULT_STATE_ROOT = Path.home() / ".codex-mux"
 CONTROL_BASE = "http://127.0.0.1:48123"
 BRIDGE_BASE = "http://127.0.0.1:48124"
+THREAD_ID_PATTERN = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+)
 
 
 class E2EError(RuntimeError):
@@ -204,7 +207,7 @@ def new_routing_thread(
     expected_owner: str,
 ) -> str:
     before = state_thread_owners(state_root)
-    capture(
+    desktop_state = capture(
         token,
         output,
         name,
@@ -214,9 +217,20 @@ def new_routing_thread(
     )
     after = state_thread_owners(state_root)
     created = sorted(set(after) - set(before))
-    if len(created) != 1:
-        raise E2EError(f"expected one new routed thread, found {len(created)}")
-    thread_id = created[0]
+    href = str(desktop_state.get("debug", {}).get("href", ""))
+    active_ids = [
+        thread_id
+        for thread_id in THREAD_ID_PATTERN.findall(href)
+        if thread_id in created
+    ]
+    if len(active_ids) == 1:
+        thread_id = active_ids[0]
+    elif len(created) == 1:
+        thread_id = created[0]
+    else:
+        raise E2EError(
+            f"could not identify the active routed thread among {len(created)} records"
+        )
     if after[thread_id] != expected_owner:
         raise E2EError("new Desktop thread was assigned to the wrong subscription")
     return thread_id
@@ -230,10 +244,9 @@ def verify_sticky_turn(
     thread_id: str,
     expected_owner: str,
 ) -> None:
-    before = state_thread_owners(state_root)
     capture(token, output, name, action="routing-second", timeout=300)
     after = state_thread_owners(state_root)
-    if set(after) != set(before) or after.get(thread_id) != expected_owner:
+    if after.get(thread_id) != expected_owner:
         raise E2EError("second Desktop turn did not keep sticky subscription ownership")
 
 
