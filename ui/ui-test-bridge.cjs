@@ -32,30 +32,40 @@ function mainWindow() {
 }
 
 async function clickProfileMenu(window) {
-  const point = await window.webContents.executeJavaScript(`(() => {
-    const target=document.querySelector(
-      'button[aria-label="Open profile menu"],button[aria-label="打开个人资料菜单"]',
-    );
-    if(!target)return null;
-    const rect=target.getBoundingClientRect();
-    return {x:Math.round(rect.x+rect.width/2),y:Math.round(rect.y+rect.height/2)};
-  })()`);
-  if (!point) return false;
-  window.webContents.sendInputEvent({
-    type: "mouseDown",
-    x: point.x,
-    y: point.y,
-    button: "left",
-    clickCount: 1,
-  });
-  window.webContents.sendInputEvent({
-    type: "mouseUp",
-    x: point.x,
-    y: point.y,
-    button: "left",
-    clickCount: 1,
-  });
-  return true;
+  window.show();
+  window.focus();
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const point = await window.webContents.executeJavaScript(`(() => {
+      const target=document.querySelector(
+        'button[aria-label="Open profile menu"],button[aria-label="打开个人资料菜单"]',
+      );
+      if(!target)return null;
+      const rect=target.getBoundingClientRect();
+      return {x:Math.round(rect.x+rect.width/2),y:Math.round(rect.y+rect.height/2)};
+    })()`);
+    if (!point) return false;
+    window.webContents.sendInputEvent({
+      type: "mouseDown",
+      x: point.x,
+      y: point.y,
+      button: "left",
+      clickCount: 1,
+    });
+    window.webContents.sendInputEvent({
+      type: "mouseUp",
+      x: point.x,
+      y: point.y,
+      button: "left",
+      clickCount: 1,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const opened = await window.webContents.executeJavaScript(`(() =>
+      (document.body?.innerText??'').includes('Usage remaining')
+    )()`);
+    if (opened) return true;
+  }
+  return false;
 }
 
 async function submitRoutingProbe(window, step, startNewChat) {
