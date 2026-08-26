@@ -150,6 +150,31 @@ def state_thread_owners(state_root: Path) -> dict[str, str]:
     return {str(key): str(value) for key, value in owners.items()}
 
 
+def threads_with_rollouts(
+    state_root: Path,
+    account_id: str,
+    thread_ids: list[str],
+) -> list[str]:
+    state = json.loads((state_root / "state.json").read_text(encoding="utf-8"))
+    account = next(
+        (
+            candidate
+            for candidate in state.get("accounts", [])
+            if candidate.get("id") == account_id
+        ),
+        None,
+    )
+    codex_home = Path(str(account.get("codexHome", ""))) if account else Path()
+    sessions = codex_home / "sessions"
+    if not sessions.is_dir():
+        return []
+    return [
+        thread_id
+        for thread_id in thread_ids
+        if any(sessions.glob(f"**/*{thread_id}.jsonl"))
+    ]
+
+
 def capture(
     token: str,
     output: Path,
@@ -225,12 +250,20 @@ def new_routing_thread(
     ]
     if len(active_ids) == 1:
         thread_id = active_ids[0]
-    elif len(created) == 1:
-        thread_id = created[0]
     else:
-        raise E2EError(
-            f"could not identify the active routed thread among {len(created)} records"
+        rollout_ids = threads_with_rollouts(
+            state_root,
+            expected_owner,
+            [candidate for candidate in created if after[candidate] == expected_owner],
         )
+        if len(rollout_ids) == 1:
+            thread_id = rollout_ids[0]
+        elif len(created) == 1:
+            thread_id = created[0]
+        else:
+            raise E2EError(
+                f"could not identify the active routed thread among {len(created)} records"
+            )
     if after[thread_id] != expected_owner:
         raise E2EError("new Desktop thread was assigned to the wrong subscription")
     return thread_id
