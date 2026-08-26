@@ -811,6 +811,20 @@ def patch_renderer(extracted: Path, token: str) -> None:
         ),
         "could not find the native ChatGPT profile menu component",
     )
+    if component_anchor.startswith("function Aql"):
+        current_renderer_identifiers = {
+            "Pql.": "Iql.",
+            "ys(Q)": "vs(Q)",
+            "VR(modalScope": "HR(modalScope",
+            "Hja(imageUrl": "Wja(imageUrl",
+            "(Bsc,": "(Ssc,",
+        }
+        for previous, current in current_renderer_identifiers.items():
+            if previous not in component:
+                raise RuntimeError(
+                    f"could not find renderer compatibility identifier: {previous}"
+                )
+            component = component.replace(previous, current)
     bundle = bundle.replace(component_anchor, component + "\n" + component_anchor, 1)
 
     plugin_rpc_mapping_anchor_groups = (
