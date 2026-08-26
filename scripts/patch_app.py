@@ -817,7 +817,7 @@ def patch_renderer(extracted: Path, token: str) -> None:
             "ys(Q)": "vs(Q)",
             "VR(modalScope": "HR(modalScope",
             "Hja(imageUrl": "Wja(imageUrl",
-            "(Bsc,": "(Ssc,",
+            "(Bsc,": "(Psc,",
         }
         for previous, current in current_renderer_identifiers.items():
             if previous not in component:
