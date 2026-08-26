@@ -287,8 +287,8 @@ def main() -> int:
 
         capture(token, output, "01-home", debug=True)
         capture(token, output, "02-account-menu", action="profile")
-        capture(token, output, "03-profile-toggle", action="profile-toggle")
-        capture(token, output, "04-settings-profile", action="settings-profile")
+        capture(token, output, "03-settings-profile", action="settings-profile")
+        capture(token, output, "04-profile-toggle", action="profile-toggle")
         capture(token, output, "05-back-from-profile", action="back-to-app")
         capture(token, output, "06-settings-plugins", action="settings-plugins")
         capture(token, output, "07-plugins-secondary", action="plugins-select-second")
