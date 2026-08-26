@@ -32,6 +32,7 @@ REQUIRED_FILES = (
     "package-lock.json",
     "package.json",
     "scripts/update_after_exit.py",
+    "scripts/run_desktop_e2e.py",
 )
 CURATED_SCREENSHOTS = (
     "screenshots/account-menu.png",

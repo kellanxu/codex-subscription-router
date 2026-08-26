@@ -32,14 +32,30 @@ function mainWindow() {
 }
 
 async function clickProfileMenu(window) {
-  return window.webContents.executeJavaScript(`(() => {
+  const point = await window.webContents.executeJavaScript(`(() => {
     const target=document.querySelector(
       'button[aria-label="Open profile menu"],button[aria-label="打开个人资料菜单"]',
     );
-    if(!target)return false;
-    target.click();
-    return true;
+    if(!target)return null;
+    const rect=target.getBoundingClientRect();
+    return {x:Math.round(rect.x+rect.width/2),y:Math.round(rect.y+rect.height/2)};
   })()`);
+  if (!point) return false;
+  window.webContents.sendInputEvent({
+    type: "mouseDown",
+    x: point.x,
+    y: point.y,
+    button: "left",
+    clickCount: 1,
+  });
+  window.webContents.sendInputEvent({
+    type: "mouseUp",
+    x: point.x,
+    y: point.y,
+    button: "left",
+    clickCount: 1,
+  });
+  return true;
 }
 
 async function submitRoutingProbe(window, step, startNewChat) {
