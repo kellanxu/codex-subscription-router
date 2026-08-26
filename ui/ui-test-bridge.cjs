@@ -101,7 +101,7 @@ async function submitRoutingProbe(window, step, startNewChat) {
   if (!submitted) throw new Error("Could not submit the routing test turn");
   const completed = await window.webContents.executeJavaScript(`new Promise((resolve) => {
     const expected=${JSON.stringify(expected)};
-    const visible=()=>(document.body?.innerText??'').includes(expected);
+    const visible=()=>((document.body?.innerText??'').split(expected).length-1)>=2;
     if(visible()){resolve(true);return;}
     const observer=new MutationObserver(()=>{if(visible()){observer.disconnect();resolve(true);}});
     observer.observe(document.body,{childList:true,subtree:true,characterData:true});
