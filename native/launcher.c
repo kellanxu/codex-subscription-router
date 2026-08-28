@@ -41,10 +41,21 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
+    const char *profile_directory = getenv("CODEX_MUX_USER_DATA_DIR");
+    char default_profile[PATH_MAX];
+    if (profile_directory == NULL || profile_directory[0] == '\0') {
+        if (snprintf(default_profile, sizeof(default_profile),
+                     "%s/Library/Application Support/Codex Subscription Router",
+                     home) >= (int)sizeof(default_profile)) {
+            fprintf(stderr, "Codex Subscription Router launcher: profile path is too long\n");
+            return EXIT_FAILURE;
+        }
+        profile_directory = default_profile;
+    }
+
     char profile[PATH_MAX];
-    if (snprintf(profile, sizeof(profile),
-                 "--user-data-dir=%s/Library/Application Support/Codex Subscription Router",
-                 home) >= (int)sizeof(profile)) {
+    if (snprintf(profile, sizeof(profile), "--user-data-dir=%s", profile_directory) >=
+        (int)sizeof(profile)) {
         fprintf(stderr, "Codex Subscription Router launcher: profile path is too long\n");
         return EXIT_FAILURE;
     }

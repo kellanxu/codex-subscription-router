@@ -4,7 +4,7 @@ const fs = require("node:fs");
 const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
-const { app, BrowserWindow } = require("electron");
+const { app, BrowserWindow, Menu } = require("electron");
 
 const HOST = "127.0.0.1";
 const PORT = 48124;
@@ -29,6 +29,150 @@ function mainWindow() {
     (window) => !window.isDestroyed() && window.getBounds().width >= 700,
   );
   return windows.find((window) => window.isVisible()) ?? windows[0];
+}
+
+function acceptanceWindows() {
+  return BrowserWindow.getAllWindows()
+    .filter((window) => !window.isDestroyed() && window.getBounds().width >= 700)
+    .sort((left, right) => left.id - right.id);
+}
+
+async function waitFor(check, timeoutMs, message) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const value = await check();
+    if (value) return value;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  throw new Error(message);
+}
+
+async function phase12RoutingState(window) {
+  return window.webContents.executeJavaScript(`(() => {
+    const panel=document.querySelector('[data-codex-mux-routing-picker="true"]');
+    const composer=panel?.closest('[data-codex-mux-composer="true"]')??null;
+    const threadOwner=panel?.querySelector('[data-codex-mux-thread-owner]')??null;
+    return {
+      href:location.href,
+      bodyText:(document.body?.innerText??'').trim().slice(0,240),
+      editorCount:document.querySelectorAll('textarea[placeholder],[contenteditable="true"]').length,
+      hasComposer:Boolean(composer),
+      view:panel?.dataset.codexMuxRoutingView??null,
+      threadId:panel?.dataset.codexMuxThreadId??null,
+      threadOwnerId:panel?.dataset.codexMuxThreadAccountId??null,
+      threadOwnerLabel:threadOwner?.textContent?.trim()??null,
+      mode:composer?.dataset.codexMuxRouteMode??null,
+      choices:panel?[...panel.querySelectorAll('button[data-codex-mux-route-choice]')]
+        .map(button=>({label:button.textContent?.trim()??'',pressed:button.getAttribute('aria-pressed')})):[],
+      badges:panel?[...panel.querySelectorAll('[data-codex-mux-plugin-badge]')]
+        .map(badge=>({text:badge.textContent?.trim()??'',title:badge.getAttribute('title')??''})):[],
+      locked:Boolean(panel&&panel.textContent?.includes('Locked for this request')),
+    };
+  })()`);
+}
+
+async function phase12ClickRoute(window, label) {
+  const clicked = await window.webContents.executeJavaScript(`(() => {
+    const label=${JSON.stringify(label)};
+    const target=[...document.querySelectorAll('button[data-codex-mux-route-choice]')]
+      .find(button=>button.textContent?.trim()===label);
+    if(!target)return false;
+    target.click();
+    return true;
+  })()`);
+  if (!clicked) throw new Error(`Could not select Phase 1 route ${label}`);
+  await waitFor(
+    async () => {
+      const state = await phase12RoutingState(window);
+      return state.choices.some(
+        (choice) => choice.label === label && choice.pressed === "true",
+      );
+    },
+    5_000,
+    `Phase 1 route ${label} did not remain selected`,
+  );
+}
+
+async function phase12StartNewTask(window) {
+  window.show();
+  window.focus();
+  const marker = `phase12-${Date.now()}-${Math.random()}`;
+  const reset = await window.webContents.executeJavaScript(`(() => {
+    const marker=${JSON.stringify(marker)};
+    const panel=document.querySelector('[data-codex-mux-routing-picker="true"]');
+    const composer=panel?.closest('[data-codex-mux-composer="true"]');
+    if(composer)composer.dataset.codexMuxAcceptanceComposer=marker;
+    const target=document.querySelector(
+      'button[aria-label="New chat"],button[aria-label="新对话"]',
+    );
+    if(!target)return false;
+    target.click();
+    return true;
+  })()`);
+  if (!reset) throw new Error("Could not return a Phase 1 window to a new task");
+  await waitFor(
+    () => window.webContents.executeJavaScript(`(() => {
+      const marker=${JSON.stringify(marker)};
+      const panel=document.querySelector('[data-codex-mux-routing-picker="true"]');
+      const composer=panel?.closest('[data-codex-mux-composer="true"]');
+      return Boolean(composer&&composer.dataset.codexMuxAcceptanceComposer!==marker);
+    })()`),
+    15_000,
+    "Phase 1 window did not create a fresh new-task owner picker",
+  );
+}
+
+async function completeIsolatedOnboarding(window) {
+  await waitFor(
+    () => window.webContents.executeJavaScript(`(() =>
+      Boolean(document.querySelector('[data-codex-mux-routing-picker="true"]'))||
+      Boolean((document.body?.innerText??'').trim())
+    )()`),
+    60_000,
+    "Isolated renderer did not leave its blank loading state",
+  );
+  const steps = [];
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    const state = await phase12RoutingState(window);
+    if (state.hasComposer) {
+      recordDiagnostic("phase12-onboarding", { steps, completed: true });
+      return;
+    }
+    const result = await window.webContents.executeJavaScript(`(() => {
+      const visible=element=>{const rect=element.getBoundingClientRect();return rect.width>0&&rect.height>0&&!element.closest('[inert],[aria-hidden="true"]')};
+      const advance=[...document.querySelectorAll('button')].filter(visible).find(button=>{
+        const text=button.textContent?.trim()??'';
+        return !button.disabled&&/^(继续|下一步|开始|完成|跳过|前往 ChatGPT|Continue|Next|Get started|Done|Skip|Go to ChatGPT)$/i.test(text);
+      });
+      if(advance){const text=advance.textContent?.trim()??'';advance.click();return {clicked:text};}
+      const leaves=[...document.querySelectorAll('button,[role="button"],[role="radio"],label')]
+        .filter(visible);
+      const option=leaves.find(element=>['Other','其他'].includes(element.textContent?.trim()))
+        ??leaves.find(element=>element.getAttribute('role')==='radio')
+        ??leaves.find(element=>{
+          const text=element.textContent?.trim()??'';
+          return text&&text.length<80&&!/继续|下一步|开始|完成|跳过|前往 ChatGPT|Continue|Next|Get started|Done|Skip|Go to ChatGPT/i.test(text);
+        });
+      if(option){const text=option.textContent?.trim()??'';option.click();return {clicked:text};}
+      return {clicked:null,body:(document.body?.innerText??'').trim().slice(0,160)};
+    })()`);
+    steps.push(result.clicked ?? result.body ?? "no-action");
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+  throw new Error(`Isolated onboarding did not reach the composer: ${JSON.stringify(steps)}`);
+}
+
+function findNewWindowMenuItem() {
+  const root = Menu.getApplicationMenu();
+  const visit = (menu) => {
+    for (const item of menu?.items ?? []) {
+      if (/^(New Window|新建窗口)$/.test(item.label ?? "")) return item;
+      const nested = visit(item.submenu);
+      if (nested) return nested;
+    }
+    return null;
+  };
+  return visit(root);
 }
 
 async function clickProfileMenu(window) {
@@ -68,9 +212,10 @@ async function clickProfileMenu(window) {
   return false;
 }
 
-async function submitRoutingProbe(window, step, startNewChat) {
-  const expected = `ROUTER_E2E_STEP_${step}_OK`;
-  const prompt = `Desktop subscription router E2E step ${step}. Reply with ${expected} only.`;
+async function submitRoutingProbe(window, step, startNewChat, waitForCompletion = true) {
+  const runId = (process.env.CODEX_MUX_ACCEPTANCE_RUN_ID ?? "").trim();
+  const expected = `ROUTER_E2E_STEP_${step}${runId ? `_${runId}` : ""}_OK`;
+  const prompt = `Router ${runId || "acceptance"} E2E step ${step}. Reply with ${expected} only.`;
   if (startNewChat) {
     const started = await window.webContents.executeJavaScript(`(() => {
       const target=document.querySelector(
@@ -98,17 +243,24 @@ async function submitRoutingProbe(window, step, startNewChat) {
     return true;
   })()`);
   if (!filled) throw new Error("Could not fill the routing test composer");
-  await new Promise((resolve) => setTimeout(resolve, 250));
-  const submitted = await window.webContents.executeJavaScript(`(() => {
-    const target=[...document.querySelectorAll('button')].find(button=>{
-      const label=button.getAttribute('aria-label');
-      return (label==='Send'||label==='发送')&&!button.disabled;
-    });
-    if(!target)return false;
-    target.click();
-    return true;
-  })()`);
+  const submitted = await waitFor(
+    () => window.webContents.executeJavaScript(`(() => {
+      const target=[...document.querySelectorAll('button')].find(button=>{
+        const label=button.getAttribute('aria-label');
+        return (label==='Send'||label==='发送')&&!button.disabled;
+      });
+      if(!target)return false;
+      target.click();
+      return true;
+    })()`),
+    10_000,
+    "Routing test send button did not become ready",
+  );
   if (!submitted) throw new Error("Could not submit the routing test turn");
+  if (!waitForCompletion) {
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    return;
+  }
   const completed = await window.webContents.executeJavaScript(`new Promise((resolve) => {
     const expected=${JSON.stringify(expected)};
     const visible=()=>[...document.querySelectorAll('body *')].some(element=>
@@ -122,9 +274,193 @@ async function submitRoutingProbe(window, step, startNewChat) {
   if (!completed) throw new Error(`Routing test step ${step} did not complete`);
 }
 
-async function runAction(window, action, delayMs) {
+async function runAction(
+  window,
+  action,
+  delayMs,
+  targetThreadId = null,
+  targetThreadTitle = null,
+) {
   window.show();
   window.focus();
+  if (action === "phase12-onboarding") {
+    await completeIsolatedOnboarding(window);
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    return;
+  }
+  if (action === "phase12-open-second-window") {
+    const before = new Set(acceptanceWindows().map((candidate) => candidate.id));
+    const item = findNewWindowMenuItem();
+    if (!item || typeof item.click !== "function") {
+      throw new Error("Could not find the native New Window menu item");
+    }
+    item.click(undefined, window.webContents, undefined);
+    await waitFor(
+      () => acceptanceWindows().find((candidate) => !before.has(candidate.id)),
+      15_000,
+      "Native New Window command did not create a second window",
+    );
+    return;
+  }
+  if (action === "phase12-dual-select") {
+    const windows = acceptanceWindows();
+    if (windows.length < 2) throw new Error("Phase 1 dual-window test needs two windows");
+    await phase12ClickRoute(windows[0], "Primary");
+    await phase12ClickRoute(windows[1], "Pro 20x");
+    const first = await phase12RoutingState(windows[0]);
+    const second = await phase12RoutingState(windows[1]);
+    if (first.mode !== "manual_locked" || second.mode !== "manual_locked") {
+      throw new Error("Dual-window manual_locked state was not isolated");
+    }
+    if (!first.locked || !second.locked) {
+      throw new Error("Dual-window manual lock indicator is missing");
+    }
+    return;
+  }
+  if (action === "phase12-recover-windows") {
+    const windows = acceptanceWindows();
+    const errorFlags = await Promise.all(
+      windows.map((candidate) => candidate.webContents.executeJavaScript(`(() =>
+        (document.body?.innerText??'').includes('Oops, an error has occurred')
+      )()`)),
+    );
+    const failed = windows.filter((_candidate, index) => errorFlags[index]);
+    if (failed.length === 0) {
+      throw new Error("No recoverable Phase 1 window error page was present");
+    }
+    for (const candidate of failed) candidate.close();
+    const item = findNewWindowMenuItem();
+    if (!item || typeof item.click !== "function") {
+      throw new Error("Could not recreate the failed native New Window");
+    }
+    item.click(undefined, acceptanceWindows()[0]?.webContents, undefined);
+    await waitFor(
+      () => acceptanceWindows().length >= 2,
+      15_000,
+      "Recreated native New Window did not appear",
+    );
+    return;
+  }
+  if (action === "phase12-refresh-badges") {
+    const windows = acceptanceWindows();
+    await Promise.all(windows.map((candidate) => candidate.webContents.executeJavaScript(`(() => {
+      const panel=document.querySelector('[data-codex-mux-routing-picker="true"]');
+      if(!panel)return false;
+      panel.dispatchEvent(new PointerEvent('pointerenter',{bubbles:true}));
+      return true;
+    })()`)));
+    await new Promise((resolve) => setTimeout(resolve, 12_500));
+    const states = await Promise.all(windows.map(phase12RoutingState));
+    if (states.some((state) => state.badges.length < 2)) {
+      throw new Error("Plugin status badges are missing for a connected account");
+    }
+    if (states.some((state) => state.badges.some((badge) => !badge.title.includes("workspace, page, and channel access are not confirmed")))) {
+      throw new Error("Plugin badge scope disclaimer is missing");
+    }
+    return;
+  }
+  if (action === "phase12-reset-second-new-task") {
+    const windows = acceptanceWindows();
+    if (windows.length < 2) throw new Error("Phase 1 reset needs two windows");
+    await phase12StartNewTask(windows[0]);
+    await phase12StartNewTask(windows[1]);
+    return;
+  }
+  if (action === "phase12-open-thread") {
+    if (!/^[0-9a-f-]{36}$/i.test(targetThreadId ?? "")) {
+      throw new Error("Phase 1 thread navigation needs a UUID threadId");
+    }
+    if (
+      typeof targetThreadTitle !== "string" ||
+      targetThreadTitle.length < 8 ||
+      targetThreadTitle.length > 100
+    ) {
+      throw new Error("Phase 1 thread navigation needs a bounded unique title");
+    }
+    const targetWindow = acceptanceWindows()[0] ?? window;
+    targetWindow.show();
+    targetWindow.focus();
+    const point = await waitFor(
+      () => targetWindow.webContents.executeJavaScript(`(() => {
+        const title=${JSON.stringify(targetThreadTitle)};
+        const target=[...document.querySelectorAll('body *')].find(element=>{
+          if(element.children.length>0||!element.textContent?.includes(title))return false;
+          const rect=element.getBoundingClientRect();
+          return rect.width>0&&rect.height>0&&rect.left>=0&&rect.right<=460;
+        });
+        if(!target)return null;
+        const rect=target.getBoundingClientRect();
+        return {x:Math.round(rect.x+rect.width/2),y:Math.round(rect.y+rect.height/2)};
+      })()`),
+      15_000,
+      `Could not open Phase 1 thread ${targetThreadId}`,
+    );
+    targetWindow.webContents.sendInputEvent({
+      type: "mouseDown",
+      x: point.x,
+      y: point.y,
+      button: "left",
+      clickCount: 1,
+    });
+    targetWindow.webContents.sendInputEvent({
+      type: "mouseUp",
+      x: point.x,
+      y: point.y,
+      button: "left",
+      clickCount: 1,
+    });
+    await waitFor(
+      async () => {
+        const state = await phase12RoutingState(targetWindow);
+        return state.threadId === targetThreadId && Boolean(state.threadOwnerId);
+      },
+      20_000,
+      `Phase 1 thread ${targetThreadId} did not render its persisted owner`,
+    );
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    return;
+  }
+  if (
+    action === "phase12-submit-default" ||
+    action === "phase12-submit-primary" ||
+    action === "phase12-submit-pro"
+  ) {
+    const windows = acceptanceWindows();
+    if (windows.length < 2) throw new Error("Phase 1 routing submission needs two windows");
+    const index = action === "phase12-submit-default" ? 1 : 0;
+    const step =
+      action === "phase12-submit-default"
+        ? 10
+        : action === "phase12-submit-primary"
+          ? 11
+          : 12;
+    const target = windows[index];
+    target.show();
+    target.focus();
+    if (action === "phase12-submit-primary") {
+      await phase12StartNewTask(target);
+      await phase12ClickRoute(target, "Primary");
+    } else if (action === "phase12-submit-pro") {
+      await phase12StartNewTask(target);
+      await phase12ClickRoute(target, "Pro 20x");
+    }
+    await submitRoutingProbe(target, step, false, false);
+    await waitFor(
+      async () => {
+        const state = await phase12RoutingState(target);
+        return (
+          state.view?.startsWith("thread:") &&
+          Boolean(state.threadId) &&
+          Boolean(state.threadOwnerId) &&
+          state.choices.length === 0
+        );
+      },
+      30_000,
+      `Phase 1 routing submission ${step} did not settle on its real thread`,
+    );
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    return;
+  }
   if (action === "profile-toggle") {
     const toggled = await window.webContents.executeJavaScript(`(() => { const target=[...document.querySelectorAll('button[aria-label]')].find(element=>{const label=element.getAttribute('aria-label')||'';return label==='Show combined profile stats'||(label.startsWith('Show ')&&label.endsWith(' profile stats'))}); if(!target)return false; target.click(); return true; })()`);
     if (!toggled) throw new Error("Could not toggle a subscription profile");
@@ -422,11 +758,31 @@ async function runAction(window, action, delayMs) {
   await new Promise((resolve) => setTimeout(resolve, delayMs));
 }
 
-async function capture(action, delayMs, includeDebug) {
+async function capture(
+  action,
+  delayMs,
+  includeDebug,
+  targetThreadId = null,
+  targetThreadTitle = null,
+) {
   let window = mainWindow();
   if (!window) throw new Error("Codex Subscription Router has no main window");
-  if (action !== null) await runAction(window, action, delayMs);
-  window = mainWindow() ?? window;
+  if (action !== null) {
+    await runAction(window, action, delayMs, targetThreadId, targetThreadTitle);
+  }
+  if (action === "phase12-open-thread" && targetThreadId) {
+    const matchingWindows = await Promise.all(
+      acceptanceWindows().map(async (candidate) => ({
+        candidate,
+        state: await phase12RoutingState(candidate),
+      })),
+    );
+    window =
+      matchingWindows.find(({ state }) => state.threadId === targetThreadId)
+        ?.candidate ?? window;
+  } else {
+    window = mainWindow() ?? window;
+  }
   const image = await window.webContents.capturePage();
   const result = {
     bounds: window.getContentBounds(),
@@ -446,6 +802,15 @@ async function capture(action, delayMs, includeDebug) {
       };
     })()`);
     result.diagnostics = diagnostics.slice(-50);
+    result.phase12 = {
+      windowCount: acceptanceWindows().length,
+      windows: await Promise.all(
+        acceptanceWindows().map(async (candidate) => ({
+          windowId: candidate.id,
+          ...(await phase12RoutingState(candidate)),
+        })),
+      ),
+    };
   }
   return result;
 }
@@ -476,6 +841,16 @@ function start() {
     const action = url.searchParams.get("action");
     if (
       action !== null &&
+      action !== "phase12-onboarding" &&
+      action !== "phase12-open-second-window" &&
+      action !== "phase12-dual-select" &&
+      action !== "phase12-recover-windows" &&
+      action !== "phase12-refresh-badges" &&
+      action !== "phase12-reset-second-new-task" &&
+      action !== "phase12-open-thread" &&
+      action !== "phase12-submit-primary" &&
+      action !== "phase12-submit-default" &&
+      action !== "phase12-submit-pro" &&
       action !== "profile" &&
 	  action !== "profile-toggle" &&
 	  action !== "settings-profile" &&
@@ -508,8 +883,20 @@ function start() {
       return;
     }
     const includeDebug = url.searchParams.get("debug") === "1";
+    const targetThreadId = url.searchParams.get("threadId");
+    const targetThreadTitle = url.searchParams.get("threadTitle");
     try {
-      writeJson(response, 200, await capture(action, delayMs, includeDebug));
+      writeJson(
+        response,
+        200,
+        await capture(
+          action,
+          delayMs,
+          includeDebug,
+          targetThreadId,
+          targetThreadTitle,
+        ),
+      );
     } catch (error) {
       writeJson(response, 500, { error: error.message });
     }

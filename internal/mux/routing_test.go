@@ -2,10 +2,12 @@ package mux
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/b-nnett/codex-subscription-router/internal/protocol"
+	"github.com/b-nnett/codex-subscription-router/internal/state"
 )
 
 func TestIsUsageLimitResponseRecognizesStructuredError(t *testing.T) {
@@ -26,6 +28,52 @@ func TestIsUsageLimitResponseIgnoresUnrelatedError(t *testing.T) {
 	}}
 	if isUsageLimitResponse(message) {
 		t.Fatal("unrelated error was misclassified as a usage limit")
+	}
+}
+
+func TestIsUsageLimitResponseIgnoresPluginRateLimitAndQuotaText(t *testing.T) {
+	for _, message := range []string{
+		"Notion connector rate limit reached",
+		"Slack workspace quota exceeded",
+		"MCP tool returned rate_limit",
+	} {
+		t.Run(message, func(t *testing.T) {
+			response := protocol.Message{Error: &protocol.RPCError{
+				Code: -32000, Message: message,
+			}}
+			if isUsageLimitResponse(response) {
+				t.Fatalf("plugin error was misclassified as subscription depletion: %q", message)
+			}
+		})
+	}
+}
+
+func TestManualLockedAndPluginThreadsCannotMigrate(t *testing.T) {
+	root := t.TempDir()
+	store, err := state.Open(filepath.Join(root, "mux"), filepath.Join(root, "primary"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := &Multiplexer{store: store}
+	if err := store.SetThreadRouting("manual", state.ThreadRoutingState{
+		Mode: state.RoutingModeManualLocked, AccountID: "primary",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if failure := m.nonMigratableThreadFailure(json.RawMessage(`1`), "manual"); failure == nil || failure.Error == nil || failure.Error.Code != -32030 {
+		t.Fatalf("manual lock did not stop migration: %#v", failure)
+	}
+	if err := store.SetThreadRouting("plugin", state.ThreadRoutingState{
+		Mode: state.RoutingModePreferred, AccountID: "primary",
+		PluginConnectors: []string{"notion@remote"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if failure := m.nonMigratableThreadFailure(json.RawMessage(`2`), "plugin"); failure == nil || failure.Error == nil || failure.Error.Code != -32033 {
+		t.Fatalf("plugin thread did not stop migration: %#v", failure)
+	}
+	if failure := m.nonMigratableThreadFailure(json.RawMessage(`3`), "legacy"); failure != nil {
+		t.Fatalf("legacy auto thread was unexpectedly locked: %#v", failure)
 	}
 }
 

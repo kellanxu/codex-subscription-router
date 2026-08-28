@@ -93,6 +93,24 @@ func TestAggregateRateLimitsReportsAllDepleted(t *testing.T) {
 	}
 }
 
+func TestAvailableSnapshotFiltersDisconnectedDisabledAndDepletedAccounts(t *testing.T) {
+	depleted := &RateLimits{Primary: &RateLimitWindow{UsedPercent: 100}}
+	snapshots := []AccountSnapshot{
+		{ID: "disconnected", Enabled: true, Connected: false, AuthType: "chatgpt"},
+		{ID: "disabled", Enabled: false, Connected: true, AuthType: "chatgpt"},
+		{ID: "depleted", Enabled: true, Connected: true, AuthType: "chatgpt", RateLimits: depleted},
+		{ID: "ready", Enabled: true, Connected: true, AuthType: "chatgpt"},
+	}
+	for _, accountID := range []string{"disconnected", "disabled", "depleted"} {
+		if _, ok := availableSnapshotByID(snapshots, accountID); ok {
+			t.Fatalf("unavailable account %q participated in selection", accountID)
+		}
+	}
+	if snapshot, ok := availableSnapshotByID(snapshots, "ready"); !ok || snapshot.ID != "ready" {
+		t.Fatalf("connected account with capacity was filtered: %#v ok=%v", snapshot, ok)
+	}
+}
+
 func TestRouteUrgencyPrefersQuotaExpiringSooner(t *testing.T) {
 	now := time.Date(2026, time.August, 16, 12, 0, 0, 0, time.UTC)
 	weeklyMinutes := int64(10_080)

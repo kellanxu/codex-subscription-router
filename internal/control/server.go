@@ -28,6 +28,7 @@ func New(address, token string, multiplexer *mux.Multiplexer, uiTests bool) *Ser
 	router.HandleFunc("/v1/accounts", server.accounts)
 	router.HandleFunc("/v1/accounts/", server.accountAction)
 	router.HandleFunc("/v1/thread-account", server.threadAccount)
+	router.HandleFunc("/v1/plugin-status", server.pluginStatus)
 	router.HandleFunc("/v1/profile/combined", server.combinedProfile)
 	router.HandleFunc("/v1/events", server.events)
 	if uiTests {
@@ -42,6 +43,26 @@ func New(address, token string, multiplexer *mux.Multiplexer, uiTests bool) *Ser
 		MaxHeaderBytes:    16 * 1024,
 	}
 	return server
+}
+
+func (s *Server) pluginStatus(response http.ResponseWriter, request *http.Request) {
+	if !s.authorized(request) {
+		writeJSON(response, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
+		return
+	}
+	if request.Method != http.MethodGet {
+		methodNotAllowed(response)
+		return
+	}
+	accountID := strings.TrimSpace(request.URL.Query().Get("accountId"))
+	if accountID == "" {
+		writeJSON(response, http.StatusBadRequest, map[string]any{"error": "accountId is required"})
+		return
+	}
+	refresh := request.URL.Query().Get("refresh") == "true"
+	ctx, cancel := context.WithTimeout(request.Context(), 2*time.Second)
+	defer cancel()
+	writeJSON(response, http.StatusOK, s.mux.PluginStatuses(ctx, accountID, refresh))
 }
 
 func (s *Server) combinedProfile(response http.ResponseWriter, request *http.Request) {
@@ -135,7 +156,11 @@ func (s *Server) threadAccount(response http.ResponseWriter, request *http.Reque
 		writeJSON(response, http.StatusNotFound, map[string]any{"error": err.Error()})
 		return
 	}
-	writeJSON(response, http.StatusOK, map[string]any{"account": account})
+	routing, _ := s.mux.ThreadRouting(threadID)
+	writeJSON(response, http.StatusOK, map[string]any{
+		"account": account,
+		"routing": routing,
+	})
 }
 
 func (s *Server) Serve(listener net.Listener) error {
@@ -202,14 +227,21 @@ func (s *Server) accountAction(response http.ResponseWriter, request *http.Reque
 
 	if len(parts) == 1 && request.Method == http.MethodPatch {
 		var input struct {
-			Label   *string `json:"label"`
-			Enabled *bool   `json:"enabled"`
+			Label     *string `json:"label"`
+			Enabled   *bool   `json:"enabled"`
+			Preferred *bool   `json:"preferred"`
 		}
 		if err := decodeJSON(request, &input); err != nil {
 			writeJSON(response, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
 		}
-		account, err := s.mux.UpdateAccount(ctx, accountID, input.Label, input.Enabled)
+		account, err := s.mux.UpdateAccountPreference(
+			ctx,
+			accountID,
+			input.Label,
+			input.Enabled,
+			input.Preferred,
+		)
 		if err != nil {
 			writeJSON(response, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return

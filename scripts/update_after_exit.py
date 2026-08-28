@@ -27,6 +27,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--go-bin", type=Path, required=True)
     parser.add_argument("--delay-seconds", type=int, default=90)
     parser.add_argument("--exit-timeout-seconds", type=int, default=120)
+    parser.add_argument(
+        "--local-rebuild",
+        action="store_true",
+        help="Install the current local worktree without syncing the repository.",
+    )
     return parser.parse_args()
 
 
@@ -88,6 +93,29 @@ def main() -> int:
     environment = os.environ.copy()
     go_bin = str(args.go_bin.expanduser().resolve())
     environment["PATH"] = go_bin + os.pathsep + environment.get("PATH", "")
+    if args.local_rebuild:
+        command = [
+            sys.executable,
+            str(ROOT / "scripts" / "patch_app.py"),
+            "--destination",
+            str(args.destination.expanduser().resolve()),
+            "--force",
+        ]
+        result = subprocess.run(command, cwd=ROOT, env=environment, check=False)
+        if result.returncode != 0:
+            return result.returncode
+        for bundle in bundles:
+            verified = subprocess.run(
+                ["codesign", "--verify", "--deep", "--strict", str(bundle)],
+                check=False,
+            )
+            if verified.returncode != 0:
+                return verified.returncode
+        return subprocess.run(
+            ["open", str(args.destination.expanduser().resolve())],
+            check=False,
+        ).returncode
+
     command = [
         sys.executable,
         str(ROOT / "scripts" / "update_guard.py"),

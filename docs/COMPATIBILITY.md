@@ -10,6 +10,7 @@ stops instead of applying a partial patch.
 
 | Official ChatGPT version | Bundle build | `app.asar` SHA-256 | Architecture |
 | --- | --- | --- | --- |
+| `26.820.60940` | `7119` | `c964aebbf9a6a0f70799d01215c611d8ef6ee63f816b3d57beccddd47a811fd9` | Apple silicon (`arm64`) |
 | `26.818.61809` | `7019` | `76bbcdc2a4a2d77cfe03904a6537d0a655f9892f27a8925e3a6c7b613801d4cf` | Apple silicon (`arm64`) |
 | `26.818.41509` | `6962` | `8eb91bd9efbf9a4dd04b9b0afdbfcb4e0bab5da18c1919ad74ca327c00c7e791` | Apple silicon (`arm64`) |
 

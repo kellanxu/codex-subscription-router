@@ -34,6 +34,8 @@ type externalRoute struct {
 	method    string
 	message   protocol.Message
 	excluded  map[string]struct{}
+	routing   *newThreadRoutingRequest
+	reason    *RouteReason
 }
 
 type serverRequestRoute struct {
@@ -89,13 +91,20 @@ type Multiplexer struct {
 
 	resetPreviewMu sync.RWMutex
 	resetPreviews  map[string]ResetCreditsPreview
+
+	pluginStatusMu       sync.Mutex
+	pluginStatusCache    map[string]pluginStatusCacheEntry
+	pluginStatusInFlight map[string]*pluginStatusRefresh
+	pluginStatusFetch    pluginStatusFetcher
+	pluginStatusTTL      time.Duration
+	pluginStatusTimeout  time.Duration
 }
 
 func New(options Options) (*Multiplexer, error) {
 	if options.RealExecutable == "" || options.Store == nil || options.Output == nil {
 		return nil, errors.New("real executable, store, and output are required")
 	}
-	return &Multiplexer{
+	multiplexer := &Multiplexer{
 		realExecutable:       options.RealExecutable,
 		realArgs:             append([]string(nil), options.RealArgs...),
 		environment:          append([]string(nil), options.Environment...),
@@ -112,7 +121,13 @@ func New(options Options) (*Multiplexer, error) {
 		resetCreditsCache:    make(map[string]resetCreditsCacheEntry),
 		resetCreditsEndpoint: rateLimitResetCreditsURL,
 		resetPreviews:        make(map[string]ResetCreditsPreview),
-	}, nil
+		pluginStatusCache:    make(map[string]pluginStatusCacheEntry),
+		pluginStatusInFlight: make(map[string]*pluginStatusRefresh),
+		pluginStatusTTL:      30 * time.Second,
+		pluginStatusTimeout:  1800 * time.Millisecond,
+	}
+	multiplexer.pluginStatusFetch = multiplexer.fetchPluginStatuses
+	return multiplexer, nil
 }
 
 func (m *Multiplexer) Start(ctx context.Context) error {
@@ -220,25 +235,35 @@ func (m *Multiplexer) handleClientNotification(message protocol.Message) {
 }
 
 func (m *Multiplexer) routeNewThread(message protocol.Message) {
+	routing, cleanedParams, err := scopedNewThreadRequest(message.Params)
+	if err != nil {
+		m.write(protocol.Failure(message.ID, -32029, err.Error()))
+		return
+	}
+	message.Params = cleanedParams
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 	defer cancel()
-	account, reason, err := m.chooseAccount(ctx)
+	account, reason, err := m.chooseAccountForNewThread(ctx, routing)
 	if err != nil {
 		if errors.Is(err, errNoSubscriptionCapacity) {
 			m.write(m.allSubscriptionsDepleted(ctx, message.ID))
 			return
 		}
-		m.write(protocol.Failure(message.ID, -32020, err.Error()))
+		code := -32020
+		if errors.Is(err, errManualRouteUnavailable) {
+			code = -32029
+		}
+		m.write(protocol.Failure(message.ID, code, err.Error()))
 		return
 	}
-	if err := m.forward(account.ID, message); err != nil {
+	if err := m.forwardNewThread(account.ID, message, routing, reason); err != nil {
 		m.write(protocol.Failure(message.ID, -32021, err.Error()))
 		return
 	}
 	m.publish(Event{
 		Type:      "thread-routed",
 		AccountID: account.ID,
-		Message:   fmt.Sprintf("New chat pinned to %s", account.Label),
+		Message:   fmt.Sprintf("New task owner: %s. %s", account.Label, reason.Summary),
 		Data:      reason,
 	})
 }
@@ -280,7 +305,26 @@ func (m *Multiplexer) forward(accountID string, message protocol.Message) error 
 	return m.forwardWithExclusions(accountID, message, nil)
 }
 
+func (m *Multiplexer) forwardNewThread(
+	accountID string,
+	message protocol.Message,
+	routing newThreadRoutingRequest,
+	reason RouteReason,
+) error {
+	return m.forwardTracked(accountID, message, nil, &routing, &reason)
+}
+
 func (m *Multiplexer) forwardWithExclusions(accountID string, message protocol.Message, excluded map[string]struct{}) error {
+	return m.forwardTracked(accountID, message, excluded, nil, nil)
+}
+
+func (m *Multiplexer) forwardTracked(
+	accountID string,
+	message protocol.Message,
+	excluded map[string]struct{},
+	routing *newThreadRoutingRequest,
+	reason *RouteReason,
+) error {
 	child, ok := m.child(accountID)
 	if !ok {
 		return fmt.Errorf("account %s is unavailable", accountID)
@@ -292,6 +336,8 @@ func (m *Multiplexer) forwardWithExclusions(accountID string, message protocol.M
 		method:    message.Method,
 		message:   message,
 		excluded:  cloneAccountSet(excluded),
+		routing:   routing,
+		reason:    reason,
 	}
 	m.externalMu.Unlock()
 	if err := child.Send(message); err != nil {
@@ -322,11 +368,26 @@ func (m *Multiplexer) routeAggregatedRateLimits(message protocol.Message) {
 func (m *Multiplexer) routeTurnStart(message protocol.Message, threadID, ownerID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*requestTimeout)
 	defer cancel()
+	connectors := explicitPluginConnectors(message.Params)
+	if len(connectors) > 0 {
+		if err := m.preflightPluginConnectors(ctx, ownerID, connectors); err != nil {
+			m.write(protocol.Failure(message.ID, -32031, err.Error()))
+			return
+		}
+		if err := m.store.AddThreadPluginConnectors(threadID, connectors); err != nil {
+			m.write(protocol.Failure(message.ID, -32032, err.Error()))
+			return
+		}
+	}
 	snapshot, err := m.accountSnapshotWithProfile(ctx, ownerID, false)
 	if err != nil || accountHasCapacity(snapshot) {
 		if err := m.forward(ownerID, message); err != nil {
 			m.write(protocol.Failure(message.ID, -32023, err.Error()))
 		}
+		return
+	}
+	if blocked := m.nonMigratableThreadFailure(message.ID, threadID); blocked != nil {
+		m.write(*blocked)
 		return
 	}
 	excluded := map[string]struct{}{ownerID: {}}
@@ -352,6 +413,11 @@ func (m *Multiplexer) failoverTurn(
 	if err := m.store.SetThreadOwner(threadID, fallback.ID); err != nil {
 		m.write(protocol.Failure(message.ID, -32028, err.Error()))
 		return
+	}
+	if routing, ok := m.store.ThreadRouting(threadID); ok {
+		routing.AccountID = fallback.ID
+		routing.Reason = "The previous owner was depleted; this non-locked, non-plugin task migrated to a connected subscription with capacity."
+		_ = m.store.SetThreadRouting(threadID, routing)
 	}
 	if err := m.forwardWithExclusions(fallback.ID, message, excluded); err != nil {
 		m.write(protocol.Failure(message.ID, -32023, err.Error()))
@@ -518,6 +584,10 @@ func (m *Multiplexer) retryTurnAfterUsageLimit(route externalRoute, exhaustedAcc
 		m.write(m.allSubscriptionsDepleted(ctx, route.message.ID))
 		return
 	}
+	if blocked := m.nonMigratableThreadFailure(route.message.ID, threadID); blocked != nil {
+		m.write(*blocked)
+		return
+	}
 	excluded := cloneAccountSet(route.excluded)
 	if excluded == nil {
 		excluded = make(map[string]struct{})
@@ -526,6 +596,33 @@ func (m *Multiplexer) retryTurnAfterUsageLimit(route externalRoute, exhaustedAcc
 	ctx, cancel := context.WithTimeout(context.Background(), 2*requestTimeout)
 	defer cancel()
 	m.failoverTurn(ctx, route.message, threadID, exhaustedAccountID, excluded)
+}
+
+func (m *Multiplexer) nonMigratableThreadFailure(
+	id json.RawMessage,
+	threadID string,
+) *protocol.Message {
+	routing, ok := m.store.ThreadRouting(threadID)
+	if !ok {
+		return nil
+	}
+	if routing.Mode == state.RoutingModeManualLocked {
+		message := protocol.Failure(
+			id,
+			-32030,
+			"This task is manually locked to its selected subscription, which is depleted. Choose a different subscription for a new task or wait for usage to reset; the existing task was not migrated.",
+		)
+		return &message
+	}
+	if len(routing.PluginConnectors) > 0 {
+		message := protocol.Failure(
+			id,
+			-32033,
+			"This plugin task cannot migrate subscriptions automatically because connector identity and workspace access are account-specific. Retry on the same subscription after usage resets, or explicitly start a new task on another authorized subscription.",
+		)
+		return &message
+	}
+	return nil
 }
 
 func (m *Multiplexer) forwardServerRequest(inbound backend.Inbound) {
@@ -559,6 +656,15 @@ func (m *Multiplexer) learnThreadOwner(route externalRoute, accountID string, re
 	case "thread/start", "thread/fork", "thread/resume", "thread/unarchive":
 		if threadID := threadIDFromResult(result); threadID != "" {
 			_ = m.store.SetThreadOwner(threadID, accountID)
+			if route.method == "thread/start" && route.routing != nil {
+				reason := ""
+				if route.reason != nil {
+					reason = route.reason.Summary
+				}
+				_ = m.store.SetThreadRouting(threadID, state.ThreadRoutingState{
+					Mode: route.routing.Mode, AccountID: accountID, Reason: reason,
+				})
+			}
 		}
 	}
 }
@@ -727,12 +833,47 @@ func isUsageLimitResponse(message protocol.Message) bool {
 	if message.Error == nil {
 		return false
 	}
-	text := strings.ToLower(message.Error.Message + " " + string(message.Error.Data))
-	return strings.Contains(text, "usage_limit") ||
-		strings.Contains(text, "usage limit") ||
-		strings.Contains(text, "rate_limit") ||
-		strings.Contains(text, "rate limit") ||
-		strings.Contains(text, "quota")
+	if structuredUsageLimit(message.Error.Data) {
+		return true
+	}
+	text := strings.ToLower(strings.TrimSpace(message.Error.Message))
+	return strings.Contains(text, "chatgpt subscription usage limit") ||
+		strings.Contains(text, "chatgpt usage limit reached")
+}
+
+func structuredUsageLimit(data json.RawMessage) bool {
+	if len(data) == 0 {
+		return false
+	}
+	var value any
+	if json.Unmarshal(data, &value) != nil {
+		return false
+	}
+	var visit func(any) bool
+	visit = func(current any) bool {
+		switch typed := current.(type) {
+		case string:
+			return strings.EqualFold(strings.TrimSpace(typed), "usage_limit_exceeded")
+		case []any:
+			for _, item := range typed {
+				if visit(item) {
+					return true
+				}
+			}
+		case map[string]any:
+			for key, item := range typed {
+				if strings.EqualFold(key, "codexErrorInfo") ||
+					strings.EqualFold(key, "errorType") ||
+					strings.EqualFold(key, "type") {
+					if visit(item) {
+						return true
+					}
+				}
+			}
+		}
+		return false
+	}
+	return visit(value)
 }
 
 func (m *Multiplexer) allSubscriptionsDepleted(ctx context.Context, id json.RawMessage) protocol.Message {
