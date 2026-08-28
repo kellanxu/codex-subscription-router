@@ -106,7 +106,7 @@ Run one command. It downloads or updates the source, installs the locked build
 dependency, creates the independently signed app, and launches it:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/kellanxu/codex-subscription-router/main/install.sh | /bin/bash
+curl -fsSL https://raw.githubusercontent.com/kexu818/codex-subscription-router/main/install.sh | /bin/bash
 ```
 
 The installer keeps its source checkout in
@@ -122,12 +122,12 @@ compatibility check fails.
 
 ### Install via prompt
 
-> Install Codex Subscription Router from `https://github.com/kellanxu/codex-subscription-router` on this Mac using the repository's supported one-command installer, without modifying the official ChatGPT app or deleting any existing router state. Verify the resulting app and Computer Use helper signatures, launch the app, and ask me only if a prerequisite or macOS permission requires interaction.
+> Install Codex Subscription Router from `https://github.com/kexu818/codex-subscription-router` on this Mac using the repository's supported one-command installer, without modifying the official ChatGPT app or deleting any existing router state. Verify the resulting app and Computer Use helper signatures, launch the app, and ask me only if a prerequisite or macOS permission requires interaction.
 
 ### Install from a clone
 
 ```sh
-git clone https://github.com/kellanxu/codex-subscription-router.git
+git clone https://github.com/kexu818/codex-subscription-router.git
 cd codex-subscription-router
 npm ci --ignore-scripts
 python3 scripts/patch_app.py

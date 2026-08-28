@@ -76,7 +76,7 @@ Appshots 和 Computer Use 需要团队签名才能稳定复用 macOS 隐私权�
 下面的命令会下载或更新本 fork、安装锁定的构建依赖、创建独立签名应用并启动：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/kellanxu/codex-subscription-router/main/install.sh | /bin/bash
+curl -fsSL https://raw.githubusercontent.com/kexu818/codex-subscription-router/main/install.sh | /bin/bash
 ```
 
 安装器把源码保存在 `~/.codex-subscription-router/source`。重复安装会复用已有账号状态，先创建可恢复备份，并检查签名团队是否连续。缺少依赖或兼容性验证失败时，安装器会明确停止。
@@ -86,12 +86,12 @@ curl -fsSL https://raw.githubusercontent.com/kellanxu/codex-subscription-router/
 
 ### 交给 Codex 安装
 
-> 在这台 Mac 上安装 `https://github.com/kellanxu/codex-subscription-router`，使用仓库支持的一键安装流程；不要修改官方 ChatGPT.app，也不要删除已有 Router 状态。安装后验证 Router 和 Computer Use helper 的签名并启动应用，仅在缺少依赖或 macOS 权限需要我操作时询问。
+> 在这台 Mac 上安装 `https://github.com/kexu818/codex-subscription-router`，使用仓库支持的一键安装流程；不要修改官方 ChatGPT.app，也不要删除已有 Router 状态。安装后验证 Router 和 Computer Use helper 的签名并启动应用，仅在缺少依赖或 macOS 权限需要我操作时询问。
 
 ### 从 clone 安装
 
 ```sh
-git clone https://github.com/kellanxu/codex-subscription-router.git
+git clone https://github.com/kexu818/codex-subscription-router.git
 cd codex-subscription-router
 npm ci --ignore-scripts
 python3 scripts/patch_app.py
