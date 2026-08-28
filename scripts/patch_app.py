@@ -47,6 +47,10 @@ OPENAI_INTERNAL_TEAM_IDENTIFIER = "HX7739G8FX"
 OPENAI_DISTRIBUTION_TEAM_IDENTIFIER = "2DC432GLL2"
 TESTED_SOURCE_BUILDS = {
     (
+        "26.820.60940",
+        "7119",
+    ): "c964aebbf9a6a0f70799d01215c611d8ef6ee63f816b3d57beccddd47a811fd9",
+    (
         "26.818.61809",
         "7019",
     ): "76bbcdc2a4a2d77cfe03904a6537d0a655f9892f27a8925e3a6c7b613801d4cf",
@@ -83,6 +87,12 @@ def parse_args() -> argparse.Namespace:
         "--allow-signing-team-change",
         action="store_true",
         help="Replace an existing build signed by a different Apple team.",
+    )
+    parser.add_argument(
+        "--control-port",
+        type=int,
+        default=CONTROL_PORT,
+        help="Loopback control port baked into the copied renderer.",
     )
     return parser.parse_args()
 
@@ -282,6 +292,37 @@ def select_unique_anchor(text: str, anchors: tuple[str, ...], error: str) -> str
     if len(matches) != 1:
         raise RuntimeError(error)
     return matches[0]
+
+
+def patch_native_route_bridge(bundle: str) -> str:
+    """Wrap the native route parser across all recorded minified builds."""
+    identifier = r"[A-Za-z_$][A-Za-z0-9_$]*"
+    pattern = re.compile(
+        rf"(?P<assignment>"
+        rf"(?P<route>{identifier})="
+        rf"(?P<call>{identifier}\(\{{"
+        rf"pathname:(?P<pathname>{identifier}),"
+        rf"routeTemplate:{identifier}\({identifier},(?P=pathname)\),"
+        rf"search:{identifier}\}}\))"
+        rf")"
+        rf"(?=,{identifier}=(?P=route)\.routeKind===`client-local-thread`\|\|"
+        rf"(?P=route)\.routeKind===`local-thread`\|\|"
+        rf"(?P=route)\.routeKind===`remote-thread`\?{identifier}\((?P=route)\):null)"
+    )
+    matches = list(pattern.finditer(bundle))
+    if len(matches) != 1:
+        raise RuntimeError(
+            "could not find a unique native renderer route bridge; "
+            f"found {len(matches)}"
+        )
+    return pattern.sub(
+        lambda match: (
+            f"{match.group('route')}="
+            f"codexMuxTrackNativeRoute({match.group('call')})"
+        ),
+        bundle,
+        count=1,
+    )
 
 
 def computer_use_package(app: Path) -> Path:
@@ -775,7 +816,46 @@ def ensure_asar_tool() -> Path:
     return asar
 
 
-def patch_renderer(extracted: Path, token: str) -> None:
+def adapt_account_menu_component(
+    component: str, component_anchor: str
+) -> tuple[str, str]:
+    """Map injected menu identifiers to the selected renderer build."""
+    jsx_runtime = "d7"
+    replacements: dict[str, str] = {}
+    if component_anchor.startswith("function Aql"):
+        replacements = {
+            "Pql.": "Iql.",
+            "ys(Q)": "vs(Q)",
+            "VR(modalScope": "HR(modalScope",
+            "Hja(imageUrl": "Wja(imageUrl",
+            "(Bsc,": "(Psc,",
+        }
+    elif component_anchor.startswith("function zbl"):
+        jsx_runtime = "m8"
+        replacements = {
+            "Pql.": "Gbl.",
+            "ys(Q)": "us(Q)",
+            "VR(modalScope": "Cz(modalScope",
+            "const resolvedImageUrl = Hja(imageUrl || null);": (
+                "const resolvedImageUrl = hza(imageUrl || null).src;"
+            ),
+            "(Bsc,": "(H6s,",
+            "d7.": "m8.",
+            "mI,": "VI,",
+            "bI.": "qI.",
+        }
+    for previous, current in replacements.items():
+        if previous not in component:
+            raise RuntimeError(
+                f"could not find renderer compatibility identifier: {previous}"
+            )
+        component = component.replace(previous, current)
+    return component, jsx_runtime
+
+
+def patch_renderer(
+    extracted: Path, token: str, control_port: int = CONTROL_PORT
+) -> None:
     webview = extracted / "webview"
     index_path = webview / "index.html"
     index = index_path.read_text(encoding="utf-8")
@@ -785,7 +865,7 @@ def patch_renderer(extracted: Path, token: str) -> None:
         raise RuntimeError("could not find ChatGPT renderer CSP connect-src")
     index = index.replace(
         connect_anchor,
-        f"{connect_anchor} http://127.0.0.1:{CONTROL_PORT}",
+        f"{connect_anchor} http://127.0.0.1:{control_port}",
         1,
     )
     index_path.write_text(index, encoding="utf-8")
@@ -801,36 +881,33 @@ def patch_renderer(extracted: Path, token: str) -> None:
         raise RuntimeError("source app already contains the Codex multiplexer menu")
 
     component = (PROJECT_ROOT / "ui" / "account-menu.js").read_text(encoding="utf-8")
-    component = component.replace("__CODEX_MUX_CONTROL_PORT__", str(CONTROL_PORT))
+    component = component.replace("__CODEX_MUX_CONTROL_PORT__", str(control_port))
     component = component.replace("__CODEX_MUX_CONTROL_TOKEN__", token)
+    new_task_router = (PROJECT_ROOT / "ui" / "new-task-router.js").read_text(
+        encoding="utf-8"
+    )
+    component += "\n" + new_task_router
     component_anchor = select_unique_anchor(
         bundle,
         (
             "function Oql(e){let t=(0,Nql.c)(253),{sidebarFooter:n,triggerButton:r}=e",
             "function Aql(e){let t=(0,Fql.c)(253),{sidebarFooter:n,triggerButton:r}=e",
+            "function zbl(e){let t=(0,Wbl.c)(252),{sidebarFooter:n,triggerButton:r}=e",
         ),
         "could not find the native ChatGPT profile menu component",
     )
-    if component_anchor.startswith("function Aql"):
-        current_renderer_identifiers = {
-            "Pql.": "Iql.",
-            "ys(Q)": "vs(Q)",
-            "VR(modalScope": "HR(modalScope",
-            "Hja(imageUrl": "Wja(imageUrl",
-            "(Bsc,": "(Psc,",
-        }
-        for previous, current in current_renderer_identifiers.items():
-            if previous not in component:
-                raise RuntimeError(
-                    f"could not find renderer compatibility identifier: {previous}"
-                )
-            component = component.replace(previous, current)
+    component, account_menu_jsx = adapt_account_menu_component(
+        component, component_anchor
+    )
     bundle = bundle.replace(component_anchor, component + "\n" + component_anchor, 1)
+
+    bundle = patch_native_route_bridge(bundle)
 
     plugin_rpc_mapping_anchor_groups = (
         (
             "sendRequest(`app/list`,{cursor:i,limit:W5r,forceRefetch:t},{trace:a})",
             "sendRequest(`app/list`,{cursor:i,limit:K5r,forceRefetch:t},{trace:a})",
+            "sendRequest(`app/list`,{cursor:i,limit:H9r,forceRefetch:t},{trace:a})",
         ),
         "sendRequest(`app/installed`,t?{forceRefresh:!0}:{})",
         (
@@ -861,7 +938,7 @@ def patch_renderer(extracted: Path, token: str) -> None:
             "return e===`config/read`?this.sendConfigReadRequest(t,n):"
             "this.enqueueRequest(e,t,e===`plugin/list`&&n?.timeoutMs==null?"
             f"{{...n,timeoutMs:{timeout_name}}}:n)}}"
-            for timeout_name in ("CFt", "DFt")
+            for timeout_name in ("CFt", "DFt", "XLt")
         ),
         "could not find the native app-server request bridge",
     )
@@ -869,7 +946,40 @@ def patch_renderer(extracted: Path, token: str) -> None:
         app_server_request_anchor,
         app_server_request_anchor.replace(
             "async sendRequest(e,t,n){",
-            "async sendRequest(e,t,n){t=codexMuxScopePluginRequest(e,t);",
+            "async sendRequest(e,t,n){t=codexMuxScopeRequest(e,t);",
+            1,
+        ),
+        1,
+    )
+
+    prewarm_thread_anchor = (
+        "async prewarmThreadStart(e,t){if(this.dispatchMessage==null)throw Error("
+        "`AppServerRequestClient is missing a message dispatcher`);"
+    )
+    if bundle.count(prewarm_thread_anchor) != 1:
+        raise RuntimeError("could not find the native thread prewarm request bridge")
+    bundle = bundle.replace(
+        prewarm_thread_anchor,
+        prewarm_thread_anchor.replace(
+            "async prewarmThreadStart(e,t){",
+            "async prewarmThreadStart(e,t){e=codexMuxScopeRequest(`thread/start`,e);",
+            1,
+        ),
+        1,
+    )
+
+    create_conversation_anchor = (
+        "async createConversation(e){let t=e.mode??`default`,"
+        "n=e.threadStartKind??`default`,r=this.getRequestedThreadHistoryMode(t),"
+    )
+    if bundle.count(create_conversation_anchor) != 1:
+        raise RuntimeError("could not find the native prewarmed-thread consume bridge")
+    bundle = bundle.replace(
+        create_conversation_anchor,
+        create_conversation_anchor.replace(
+            "async createConversation(e){",
+            "async createConversation(e){if(codexMuxShouldDiscardPrewarmedThread())"
+            "this.params.prewarmedThreadManager.discardAllPrewarmedThreads();",
             1,
         ),
         1,
@@ -880,6 +990,7 @@ def patch_renderer(extracted: Path, token: str) -> None:
         (
             "let e=await B_.safeGet(`/wham/profiles/me`)",
             "let e=await R_.safeGet(`/wham/profiles/me`)",
+            "let e=await wb.safeGet(`/wham/profiles/me`)",
         ),
         "could not find the native profile stats request",
     )
@@ -896,6 +1007,7 @@ def patch_renderer(extracted: Path, token: str) -> None:
             "function Bsc(e){let t=(0,Vsc.c)(20),{defaultResetCreditsOpen:n",
             "function Ssc(e){let t=(0,Tsc.c)(96),{availableCount:n,"
             "availableResetCredits:r,defaultResetCreditsOpen:i",
+            "function H6s(e){let t=(0,U6s.c)(20),{defaultResetCreditsOpen:n",
         ),
         "could not find the native Usage modal component",
     )
@@ -920,12 +1032,20 @@ def patch_renderer(extracted: Path, token: str) -> None:
             "(t={queryKey:[`rate-limit-reset-credits`],queryFn:OCa,"
             "refetchInterval:Ap.ONE_MINUTE,staleTime:Ap.FIVE_SECONDS},e[0]=t):"
             "t=e[0],It(t)}",
+            "function $Aa(){let e=(0,cH.c)(1),t;return "
+            "e[0]===Symbol.for(`react.memo_cache_sentinel`)?"
+            "(t={queryKey:[`rate-limit-reset-credits`],queryFn:eja,"
+            "refetchInterval:Qp.ONE_MINUTE,staleTime:Qp.FIVE_SECONDS},e[0]=t):"
+            "t=e[0],It(t)}",
         ),
         "could not find the native reset-credit query",
     )
-    reset_query_name = "TCa" if reset_query_anchor.startswith("function TCa") else "DCa"
-    reset_query_fn = "ECa" if reset_query_name == "TCa" else "OCa"
-    reset_timer = "jp" if reset_query_name == "TCa" else "Ap"
+    if reset_query_anchor.startswith("function TCa"):
+        reset_query_name, reset_query_fn, reset_timer = "TCa", "ECa", "jp"
+    elif reset_query_anchor.startswith("function DCa"):
+        reset_query_name, reset_query_fn, reset_timer = "DCa", "OCa", "Ap"
+    else:
+        reset_query_name, reset_query_fn, reset_timer = "$Aa", "eja", "Qp"
     bundle = bundle.replace(
         reset_query_anchor,
         f"function {reset_query_name}(){{let e=window.__codexMuxResetAccountId;"
@@ -954,6 +1074,13 @@ def patch_renderer(extracted: Path, token: str) -> None:
             "t.setQueryData([`rate-limit-reset-credits`],e=>$Sa(e,a,n))}"
             "Promise.all([n([`rate-limit-status`]),n([`rate-limit-reset-credits`])])}},"
             "e[0]=n,e[1]=t,e[2]=r):r=e[2],Qt(r)}",
+            "function tja(){let e=(0,cH.c)(3),t=ct(),n=yS(),r;return "
+            "e[0]!==n||e[1]!==t?(r={mutationFn:nja,onSuccess:(e,r)=>{"
+            "let{creditId:i}=r,a=e.code;if(a===`reset`||a===`already_redeemed`){"
+            "let n=e.code===`reset`?e.credit?.id??i:i;"
+            "t.setQueryData([`rate-limit-reset-credits`],e=>TAa(e,a,n))}"
+            "Promise.all([n([`rate-limit-status`]),n([`rate-limit-reset-credits`])])}},"
+            "e[0]=n,e[1]=t,e[2]=r):r=e[2],Qt(r)}",
         ),
         "could not find the native reset-credit mutation",
     )
@@ -964,12 +1091,19 @@ def patch_renderer(extracted: Path, token: str) -> None:
             "OCa",
             "ZSa",
         )
-    else:
+    elif reset_mutation_anchor.startswith("function kCa"):
         mutation_function, invalidate_function, consume_function, updater = (
             "kCa",
             "gb",
             "ACa",
             "$Sa",
+        )
+    else:
+        mutation_function, invalidate_function, consume_function, updater = (
+            "tja",
+            "yS",
+            "nja",
+            "TAa",
         )
     bundle = bundle.replace(
         reset_mutation_anchor,
@@ -1000,13 +1134,19 @@ def patch_renderer(extracted: Path, token: str) -> None:
             "(_e=(0,u0.jsxs)(IR,{children:[he,ge]}),t[46]=he,t[47]=_e);",
             "let _e;t[46]===he?_e=t[47]:"
             "(_e=(0,u0.jsxs)(LR,{children:[he,ge]}),t[46]=he,t[47]=_e);",
+            "let _e;t[46]===he?_e=t[47]:"
+            "(_e=(0,u1.jsxs)(vz,{children:[he,ge]}),t[46]=he,t[47]=_e);",
         ),
         "could not find the native Usage sheet header",
     )
-    usage_header_component = "IR" if "(IR," in usage_header_anchor else "LR"
+    if "(vz," in usage_header_anchor:
+        usage_header_jsx, usage_header_component = "u1", "vz"
+    else:
+        usage_header_jsx = "u0"
+        usage_header_component = "IR" if "(IR," in usage_header_anchor else "LR"
     bundle = bundle.replace(
         usage_header_anchor,
-        f"let _e=(0,u0.jsxs)({usage_header_component},{{children:[he,ge,"
+        f"let _e=(0,{usage_header_jsx}.jsxs)({usage_header_component},{{children:[he,ge,"
         "window.__codexMuxResetAccountSelector??null]});",
         1,
     )
@@ -1016,17 +1156,23 @@ def patch_renderer(extracted: Path, token: str) -> None:
         raise RuntimeError("could not find the native ChatGPT usage menu slot")
     bundle = bundle.replace(
         usage_anchor,
-        "usageItems:(0,d7.jsx)(CodexMuxAccountMenu,{})",
+        f"usageItems:(0,{account_menu_jsx}.jsx)(CodexMuxAccountMenu,{{}})",
         1,
     )
 
-    open_change_anchors = (
-        "triggerButton:Dt,onOpenChange:l,children:P",
-        "open:s,onOpenChange:l,contentWidth:`panel`,triggerButton:Dt",
+    open_change_anchor_groups = (
+        (
+            "triggerButton:Dt,onOpenChange:l,children:P",
+            "triggerButton:Dt,onOpenChange:l,children:N",
+        ),
+        ("open:s,onOpenChange:l,contentWidth:`panel`,triggerButton:Dt",),
     )
-    for anchor in open_change_anchors:
-        if bundle.count(anchor) != 1:
-            raise RuntimeError("could not find a native profile menu open-state hook")
+    for anchors in open_change_anchor_groups:
+        anchor = select_unique_anchor(
+            bundle,
+            anchors,
+            "could not find a native profile menu open-state hook",
+        )
         bundle = bundle.replace(
             anchor,
             anchor.replace(
@@ -1058,31 +1204,51 @@ def patch_renderer(extracted: Path, token: str) -> None:
         )
     profile_bundle_path = profile_bundles[0]
     profile_bundle = profile_bundle_path.read_text(encoding="utf-8")
-    profile_avatar_anchor = (
-        "children:[(0,$.jsxs)(`label`,{\"aria-disabled\":R.isPending,className:o("
-        "`group relative flex size-20 rounded-full"
+    profile_avatar_anchor = select_unique_anchor(
+        profile_bundle,
+        (
+            "children:[(0,$.jsxs)(`label`,{\"aria-disabled\":R.isPending,className:o("
+            "`group relative flex size-20 rounded-full",
+            "children:[(0,$.jsxs)(`label`,{\"aria-disabled\":I.isPending,className:$t("
+            "`group relative flex size-20 rounded-full",
+        ),
+        "could not find the native Profile avatar",
     )
-    if profile_bundle.count(profile_avatar_anchor) != 1:
-        raise RuntimeError("could not find the native Profile avatar")
+    if "I.isPending" in profile_avatar_anchor:
+        profile_avatar_replacement = (
+            "children:[globalThis.CodexMuxProfileAvatarStack?.("
+            "{onSelect:()=>{}})??null,"
+            "(0,$.jsxs)(`label`,{\"aria-disabled\":I.isPending,className:$t("
+            "globalThis.CodexMuxProfileAvatarStack?"
+            "`hidden`:`group relative flex size-20 rounded-full"
+        )
+    else:
+        profile_avatar_replacement = (
+            "children:[globalThis.CodexMuxProfileAvatarStack?.("
+            "{onSelect:()=>{}})??null,"
+            "(0,$.jsxs)(`label`,{\"aria-disabled\":R.isPending,className:o("
+            "globalThis.CodexMuxProfileAvatarStack?"
+            "`hidden`:`group relative flex size-20 rounded-full"
+        )
     profile_bundle = profile_bundle.replace(
         profile_avatar_anchor,
-        "children:[globalThis.CodexMuxProfileAvatarStack?.("
-        "{onSelect:()=>{}})??null,"
-        "(0,$.jsxs)(`label`,{\"aria-disabled\":R.isPending,className:o("
-        "globalThis.CodexMuxProfileAvatarStack?"
-        "`hidden`:`group relative flex size-20 rounded-full",
+        profile_avatar_replacement,
         1,
     )
 
-    profile_name_anchor = (
-        "(0,$.jsx)(`div`,{className:`text-base font-normal text-default`,children:yt})"
+    profile_name_anchor = select_unique_anchor(
+        profile_bundle,
+        (
+            "(0,$.jsx)(`div`,{className:`text-base font-normal text-default`,children:yt})",
+            "(0,$.jsx)(`div`,{className:`text-base font-normal text-default`,children:pt})",
+        ),
+        "could not find the native Profile display name",
     )
-    if profile_bundle.count(profile_name_anchor) != 1:
-        raise RuntimeError("could not find the native Profile display name")
+    profile_name_value = "pt" if "children:pt" in profile_name_anchor else "yt"
     profile_bundle = profile_bundle.replace(
         profile_name_anchor,
         "(0,$.jsx)(`div`,{className:globalThis.__codexMuxSelectedProfileAccountId?"
-        "`text-base font-normal text-default`:`hidden`,children:yt})",
+        f"`text-base font-normal text-default`:`hidden`,children:{profile_name_value}}})",
         1,
     )
     profile_identity_anchor = (
@@ -1136,12 +1302,30 @@ def patch_renderer(extracted: Path, token: str) -> None:
         encoding="utf-8"
     )
     thread_component = thread_component.replace(
-        "__CODEX_MUX_CONTROL_PORT__", str(CONTROL_PORT)
+        "__CODEX_MUX_CONTROL_PORT__", str(control_port)
     )
     thread_component = thread_component.replace("__CODEX_MUX_CONTROL_TOKEN__", token)
-    thread_component_anchor = "function VT(e){let t=(0,WT.c)(33)"
-    if thread_bundle.count(thread_component_anchor) != 1:
-        raise RuntimeError("could not find the native thread summary sources component")
+    thread_component_anchor = select_unique_anchor(
+        thread_bundle,
+        (
+            "function VT(e){let t=(0,WT.c)(33)",
+            "function hE(e){let t=(0,vE.c)(33)",
+        ),
+        "could not find the native thread summary sources component",
+    )
+    if thread_component_anchor.startswith("function hE"):
+        current_thread_identifiers = {
+            "$t(ge)": "Rt(P)",
+            "t(io(), 1)": "t(po(),1)",
+            "GT.": "yE.",
+            "Z.Section": "W.Section",
+        }
+        for previous, current in current_thread_identifiers.items():
+            if previous not in thread_component:
+                raise RuntimeError(
+                    f"could not find thread compatibility identifier: {previous}"
+                )
+            thread_component = thread_component.replace(previous, current)
     thread_bundle = thread_bundle.replace(
         thread_component_anchor,
         thread_component + "\n" + thread_component_anchor,
@@ -1152,7 +1336,9 @@ def patch_renderer(extracted: Path, token: str) -> None:
         raise RuntimeError("could not find the native thread summary section list")
     thread_bundle = thread_bundle.replace(
         summary_children_anchor,
-        "children:[l,u,d,f,(0,GT.jsx)(CodexMuxThreadSubscription,{}),p,m,h,g,_,v,y,b,x,S,C]",
+        "children:[l,u,d,f,(0,"
+        + ("yE" if thread_component_anchor.startswith("function hE") else "GT")
+        + ".jsx)(CodexMuxThreadSubscription,{}),p,m,h,g,_,v,y,b,x,S,C]",
         1,
     )
     thread_bundle_path.write_text(thread_bundle, encoding="utf-8")
@@ -1187,7 +1373,7 @@ def patch_desktop_profile(
         "process.env.CODEX_ELECTRON_COMPUTER_USE_APP_PATH="
         f"{computer_use_app};"
         "process.env.CODEX_ELECTRON_SKIP_COMPUTER_USE_CANONICAL_REFRESH=`1`;"
-        "a.app.setPath(`userData`,"
+        "a.app.setPath(`userData`,process.env.CODEX_MUX_USER_DATA_DIR||"
         f"a.app.getPath(`appData`)+`/{DESKTOP_PROFILE_NAME}`)",
         1,
     )
@@ -1293,9 +1479,12 @@ def patch_app(
     allow_adhoc_signing: bool,
     allow_untested_source: bool,
     allow_signing_team_change: bool,
+    control_port: int = CONTROL_PORT,
 ) -> None:
     source = source.expanduser().resolve()
     destination = destination.expanduser().resolve()
+    if control_port <= 0 or control_port > 65535:
+        raise RuntimeError("control port must be between 1 and 65535")
     if not source.is_dir() or not (source / "Contents" / "Resources" / "app.asar").is_file():
         raise RuntimeError(f"not a ChatGPT app bundle: {source}")
     if source == destination:
@@ -1378,7 +1567,7 @@ def patch_app(
         run([str(asar), "extract", str(original_asar), str(extracted)])
         patch_asar_computer_use_identity(extracted)
         patch_desktop_profile(extracted, installed_computer_use_app)
-        patch_renderer(extracted, token)
+        patch_renderer(extracted, token, control_port)
         sign_native_code_tree(extracted, signing_identity)
         repacked_asar = temporary_path / "app.asar"
         run(
@@ -1417,7 +1606,8 @@ def patch_app(
         bundled_codex.chmod(0o755)
 
         patch_info_plist(staged_app, original_asar, team_identifier)
-        print(f"Signing independent app copy with {signing_identity}…")
+        signing_kind = "ad-hoc" if signing_identity == "-" else "configured Apple identity"
+        print(f"Signing independent app copy with {signing_kind}…")
         sign_independent_app(staged_app, signing_identity, team_identifier)
         verify_signed_code(
             staged_app,
@@ -1518,6 +1708,7 @@ def main() -> int:
             args.allow_adhoc_signing,
             args.allow_untested_source,
             args.allow_signing_team_change,
+            args.control_port,
         )
     except (RuntimeError, OSError, subprocess.CalledProcessError) as error:
         print(f"patch failed: {error}", file=sys.stderr)

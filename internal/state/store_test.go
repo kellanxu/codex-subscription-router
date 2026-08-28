@@ -1,11 +1,97 @@
 package state
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestOpenMigratesVersionOneWithoutChangingExistingOwners(t *testing.T) {
+	root := t.TempDir()
+	primaryHome := filepath.Join(root, "primary")
+	if err := os.MkdirAll(primaryHome, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	stateRoot := filepath.Join(root, "mux")
+	if err := os.MkdirAll(stateRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	legacy := map[string]any{
+		"version": 1,
+		"accounts": []map[string]any{{
+			"id": "primary", "label": "Primary", "codexHome": primaryHome,
+			"enabled": true, "controller": true, "createdAt": int64(1),
+		}},
+		"threadOwner": map[string]string{"existing-thread": "primary"},
+	}
+	encoded, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stateRoot, "state.json"), encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := Open(stateRoot, primaryHome)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, ok := store.ThreadOwner("existing-thread")
+	if !ok || owner != "primary" {
+		t.Fatalf("v1 owner changed during migration: owner=%q ok=%v", owner, ok)
+	}
+	persisted, err := os.ReadFile(filepath.Join(stateRoot, "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var migrated map[string]any
+	if err := json.Unmarshal(persisted, &migrated); err != nil {
+		t.Fatal(err)
+	}
+	if migrated["version"] != float64(2) {
+		t.Fatalf("state was not migrated to v2: %s", persisted)
+	}
+}
+
+func TestPreferredAccountAndManualThreadRoutingPersistIndependently(t *testing.T) {
+	root := t.TempDir()
+	primaryHome := filepath.Join(root, "primary")
+	store, err := Open(filepath.Join(root, "mux"), primaryHome)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pro, err := store.AddAccount("Pro 20x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetPreferredAccountID(pro.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetThreadOwner("locked-thread", "primary"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetThreadRouting("locked-thread", ThreadRoutingState{
+		Mode: RoutingModeManualLocked, AccountID: "primary", Reason: "manual",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(filepath.Join(root, "mux"), primaryHome)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reopened.PreferredAccountID() != pro.ID {
+		t.Fatalf("preferred account was not persisted: %q", reopened.PreferredAccountID())
+	}
+	owner, _ := reopened.ThreadOwner("locked-thread")
+	if owner != "primary" {
+		t.Fatalf("preferred default changed an existing owner: %q", owner)
+	}
+	routing, ok := reopened.ThreadRouting("locked-thread")
+	if !ok || routing.Mode != RoutingModeManualLocked || routing.AccountID != "primary" {
+		t.Fatalf("manual routing was not persisted: %#v ok=%v", routing, ok)
+	}
+}
 
 func TestStoreBootstrapsPrimaryAndPersistsThreadAffinity(t *testing.T) {
 	root := t.TempDir()

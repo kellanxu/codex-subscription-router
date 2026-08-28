@@ -7,11 +7,13 @@ function CodexMuxThreadSubscription() {
     route.value.routeKind === "local-thread" ? route.value.conversationId : null;
   const CodexMuxThreadReact = t(io(), 1);
   const [account, setAccount] = CodexMuxThreadReact.useState(null);
+  const [routing, setRouting] = CodexMuxThreadReact.useState(null);
 
   CodexMuxThreadReact.useEffect(() => {
     let active = true;
     if (!threadId) {
       setAccount(null);
+      setRouting(null);
       return () => {
         active = false;
       };
@@ -25,9 +27,15 @@ function CodexMuxThreadSubscription() {
         );
         if (!response.ok) throw new Error(`Request failed (${response.status})`);
         const body = await response.json();
-        if (active) setAccount(body.account || null);
+        if (active) {
+          setAccount(body.account || null);
+          setRouting(body.routing || null);
+        }
       } catch {
-        if (active) setAccount(null);
+        if (active) {
+          setAccount(null);
+          setRouting(null);
+        }
       }
     };
 
@@ -66,35 +74,47 @@ function CodexMuxThreadSubscription() {
     sectionKey: "codex-mux-subscription",
     title: "Subscription",
     children: (0, GT.jsxs)("div", {
-      className: "flex min-h-9 items-center justify-between gap-3 py-1 text-sm",
+      className: "flex min-h-9 flex-col gap-1 py-1 text-sm",
       children: [
         (0, GT.jsxs)("div", {
-          className: "flex min-w-0 items-center gap-2",
+          className: "flex min-w-0 items-center justify-between gap-3",
           children: [
-            AccountAvatar
-              ? (0, GT.jsx)(AccountAvatar, {
-                  imageUrl: account.profileImageUrl,
-                  label: account.label,
-                  className: "size-5 shrink-0",
-                })
-              : null,
+            (0, GT.jsxs)("div", {
+              className: "flex min-w-0 items-center gap-2",
+              children: [
+                AccountAvatar
+                  ? (0, GT.jsx)(AccountAvatar, {
+                      imageUrl: account.profileImageUrl,
+                      label: account.label,
+                      className: "size-5 shrink-0",
+                    })
+                  : null,
+                (0, GT.jsx)("span", {
+                  className: "truncate text-token-text-primary",
+                  children: account.planLabel
+                    ? `${account.label} · ${account.planLabel}`
+                    : account.label,
+                }),
+              ],
+            }),
             (0, GT.jsx)("span", {
-              className: "truncate text-token-text-primary",
-              children: account.planLabel
-                ? `${account.label} · ${account.planLabel}`
-                : account.label,
+              className:
+                "shrink-0 tabular-nums text-token-description-foreground",
+              children:
+                remaining == null
+                  ? "Usage unavailable"
+                  : depleted
+                    ? "Depleted"
+                    : `${Math.round(remaining)}% remaining`,
             }),
           ],
         }),
-        (0, GT.jsx)("span", {
-          className: "shrink-0 tabular-nums text-token-description-foreground",
-          children:
-            remaining == null
-              ? "Usage unavailable"
-              : depleted
-                ? "Depleted"
-                : `${Math.round(remaining)}% remaining`,
-        }),
+        routing?.reason
+          ? (0, GT.jsx)("div", {
+              className: "text-xs leading-snug text-token-text-tertiary",
+              children: routing.reason,
+            })
+          : null,
       ],
     }),
   });

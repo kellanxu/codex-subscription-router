@@ -14,7 +14,13 @@ import (
 	"time"
 )
 
-const stateVersion = 1
+const stateVersion = 2
+
+const (
+	RoutingModeAuto         = "auto"
+	RoutingModePreferred    = "preferred"
+	RoutingModeManualLocked = "manual_locked"
+)
 
 type Account struct {
 	ID         string `json:"id"`
@@ -26,9 +32,20 @@ type Account struct {
 }
 
 type persistedState struct {
-	Version     int               `json:"version"`
-	Accounts    []Account         `json:"accounts"`
-	ThreadOwner map[string]string `json:"threadOwner"`
+	Version            int                           `json:"version"`
+	Accounts           []Account                     `json:"accounts"`
+	ThreadOwner        map[string]string             `json:"threadOwner"`
+	PreferredAccountID string                        `json:"preferredAccountId,omitempty"`
+	ThreadRouting      map[string]ThreadRoutingState `json:"threadRouting,omitempty"`
+}
+
+// ThreadRoutingState records only routing policy and connector identifiers.
+// OAuth credentials and connector workspace identities remain account-local.
+type ThreadRoutingState struct {
+	Mode             string   `json:"mode"`
+	AccountID        string   `json:"accountId,omitempty"`
+	Reason           string   `json:"reason,omitempty"`
+	PluginConnectors []string `json:"pluginConnectors,omitempty"`
 }
 
 // Store persists only routing metadata. OAuth credentials and conversation
@@ -40,6 +57,8 @@ type Store struct {
 	primaryCodexHome string
 	accounts         []Account
 	owners           map[string]string
+	preferredAccount string
+	threadRouting    map[string]ThreadRoutingState
 }
 
 func Open(root, primaryCodexHome string) (*Store, error) {
@@ -58,6 +77,7 @@ func Open(root, primaryCodexHome string) (*Store, error) {
 		path:             filepath.Join(root, "state.json"),
 		primaryCodexHome: primaryCodexHome,
 		owners:           make(map[string]string),
+		threadRouting:    make(map[string]ThreadRoutingState),
 	}
 	data, err := os.ReadFile(store.path)
 	switch {
@@ -66,12 +86,21 @@ func Open(root, primaryCodexHome string) (*Store, error) {
 		if err := json.Unmarshal(data, &persisted); err != nil {
 			return nil, fmt.Errorf("read state: %w", err)
 		}
-		if persisted.Version != stateVersion {
+		if persisted.Version != 1 && persisted.Version != stateVersion {
 			return nil, fmt.Errorf("unsupported state version %d", persisted.Version)
 		}
 		store.accounts = persisted.Accounts
 		if persisted.ThreadOwner != nil {
 			store.owners = persisted.ThreadOwner
+		}
+		store.preferredAccount = persisted.PreferredAccountID
+		if persisted.ThreadRouting != nil {
+			store.threadRouting = persisted.ThreadRouting
+		}
+		if persisted.Version == 1 {
+			if err := store.saveLocked(); err != nil {
+				return nil, fmt.Errorf("migrate state version 1: %w", err)
+			}
 		}
 	case errors.Is(err, os.ErrNotExist):
 		store.accounts = []Account{{
@@ -153,6 +182,34 @@ func (s *Store) Controller() (Account, bool) {
 		return Account{}, false
 	}
 	return s.accounts[0], true
+}
+
+func (s *Store) PreferredAccountID() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.preferredAccount
+}
+
+func (s *Store) SetPreferredAccountID(accountID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if accountID != "" {
+		found := false
+		for _, account := range s.accounts {
+			if account.ID == accountID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("account %q not found", accountID)
+		}
+	}
+	if s.preferredAccount == accountID {
+		return nil
+	}
+	s.preferredAccount = accountID
+	return s.saveLocked()
 }
 
 func (s *Store) AddAccount(label string) (Account, error) {
@@ -237,6 +294,53 @@ func (s *Store) SetThreadOwner(threadID, accountID string) error {
 	return s.saveLocked()
 }
 
+func (s *Store) ThreadRouting(threadID string) (ThreadRoutingState, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	routing, ok := s.threadRouting[threadID]
+	routing.PluginConnectors = slices.Clone(routing.PluginConnectors)
+	return routing, ok
+}
+
+func (s *Store) SetThreadRouting(threadID string, routing ThreadRoutingState) error {
+	if threadID == "" || routing.Mode == "" {
+		return errors.New("thread ID and routing mode are required")
+	}
+	switch routing.Mode {
+	case RoutingModeAuto, RoutingModePreferred, RoutingModeManualLocked:
+	default:
+		return fmt.Errorf("unsupported routing mode %q", routing.Mode)
+	}
+	routing.PluginConnectors = uniqueStrings(routing.PluginConnectors)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, ok := s.threadRouting[threadID]
+	if ok && routing.AccountID == "" {
+		routing.AccountID = current.AccountID
+	}
+	if ok && routing.Reason == "" {
+		routing.Reason = current.Reason
+	}
+	s.threadRouting[threadID] = routing
+	return s.saveLocked()
+}
+
+func (s *Store) AddThreadPluginConnectors(threadID string, connectors []string) error {
+	connectors = uniqueStrings(connectors)
+	if threadID == "" || len(connectors) == 0 {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	routing := s.threadRouting[threadID]
+	if routing.Mode == "" {
+		routing.Mode = RoutingModeAuto
+	}
+	routing.PluginConnectors = uniqueStrings(append(routing.PluginConnectors, connectors...))
+	s.threadRouting[threadID] = routing
+	return s.saveLocked()
+}
+
 func (s *Store) ThreadCounts() map[string]int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -249,9 +353,11 @@ func (s *Store) ThreadCounts() map[string]int {
 
 func (s *Store) saveLocked() error {
 	persisted := persistedState{
-		Version:     stateVersion,
-		Accounts:    s.accounts,
-		ThreadOwner: s.owners,
+		Version:            stateVersion,
+		Accounts:           s.accounts,
+		ThreadOwner:        s.owners,
+		PreferredAccountID: s.preferredAccount,
+		ThreadRouting:      s.threadRouting,
 	}
 	data, err := json.MarshalIndent(persisted, "", "  ")
 	if err != nil {
@@ -268,6 +374,23 @@ func (s *Store) saveLocked() error {
 		return fmt.Errorf("commit state: %w", err)
 	}
 	return nil
+}
+
+func uniqueStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
 }
 
 func randomID() (string, error) {

@@ -370,7 +370,7 @@ function CodexMuxAccountMenu() {
     (0, d7.jsx)(
       mI,
       {
-        LeftIcon: g0,
+        LeftIcon: CodexMuxUsageIcon,
         SubText: loading
           ? "Connecting subscriptions…"
           : connected.length === 1
@@ -450,7 +450,7 @@ function CodexMuxAccountMenu() {
       (0, d7.jsx)(
         mI,
         {
-          LeftIcon: g0,
+          LeftIcon: CodexMuxUsageIcon,
           SubText: error,
           tone: "danger",
           allowWrap: true,
@@ -510,6 +510,31 @@ function CodexMuxPlusIcon(props) {
       stroke: "currentColor",
       strokeWidth: 1.5,
       strokeLinecap: "round",
+    }),
+  });
+}
+
+function CodexMuxUsageIcon(props) {
+  return (0, d7.jsx)("svg", {
+    viewBox: "0 0 20 20",
+    fill: "none",
+    "aria-hidden": true,
+    ...props,
+    children: (0, d7.jsxs)(d7.Fragment, {
+      children: [
+        (0, d7.jsx)("path", {
+          d: "M4.25 15.75a7 7 0 1 1 11.5 0",
+          stroke: "currentColor",
+          strokeWidth: 1.5,
+          strokeLinecap: "round",
+        }),
+        (0, d7.jsx)("path", {
+          d: "m10 10 3-2",
+          stroke: "currentColor",
+          strokeWidth: 1.5,
+          strokeLinecap: "round",
+        }),
+      ],
     }),
   });
 }

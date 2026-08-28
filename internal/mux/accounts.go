@@ -38,6 +38,7 @@ type AccountSnapshot struct {
 	Label           string          `json:"label"`
 	Enabled         bool            `json:"enabled"`
 	Controller      bool            `json:"controller"`
+	Preferred       bool            `json:"preferred"`
 	Connected       bool            `json:"connected"`
 	Email           string          `json:"email,omitempty"`
 	PlanType        string          `json:"planType,omitempty"`
@@ -52,6 +53,10 @@ type AccountSnapshot struct {
 }
 
 type RouteReason struct {
+	Mode                 string   `json:"mode"`
+	Summary              string   `json:"summary"`
+	RequestedAccountID   string   `json:"requestedAccountId,omitempty"`
+	PreferredAccountID   string   `json:"preferredAccountId,omitempty"`
 	WeeklyUsedPercent    *float64 `json:"weeklyUsedPercent"`
 	WeeklyResetsAt       *int64   `json:"weeklyResetsAt,omitempty"`
 	ShortUsedPercent     *float64 `json:"shortUsedPercent"`
@@ -59,6 +64,134 @@ type RouteReason struct {
 	ResetCreditExpiresAt *int64   `json:"resetCreditExpiresAt,omitempty"`
 	UrgencyScore         *float64 `json:"urgencyScore,omitempty"`
 	ThreadCount          int      `json:"threadCount"`
+}
+
+func (m *Multiplexer) chooseAccountForNewThread(
+	ctx context.Context,
+	routing newThreadRoutingRequest,
+) (state.Account, RouteReason, error) {
+	switch routing.Mode {
+	case state.RoutingModeManualLocked:
+		account, ok := m.store.Account(routing.AccountID)
+		if !ok || !account.Enabled {
+			return state.Account{}, RouteReason{}, fmt.Errorf(
+				"%w: choose another subscription or reconnect the selected account",
+				errManualRouteUnavailable,
+			)
+		}
+		snapshot, err := m.accountSnapshotWithProfile(ctx, account.ID, false)
+		if err != nil || !accountHasCapacity(snapshot) {
+			return state.Account{}, RouteReason{}, fmt.Errorf(
+				"%w: %s is disconnected, disabled, or depleted; choose another subscription",
+				errManualRouteUnavailable,
+				account.Label,
+			)
+		}
+		return account, routeReasonForSnapshot(
+			snapshot,
+			state.RoutingModeManualLocked,
+			"Manual selection locked this task to the chosen subscription.",
+			routing.AccountID,
+			m.store.PreferredAccountID(),
+		), nil
+	case state.RoutingModeAuto:
+		account, reason, err := m.chooseAccount(ctx)
+		if err != nil {
+			return state.Account{}, RouteReason{}, err
+		}
+		reason.Mode = state.RoutingModeAuto
+		reason.Summary = "Auto selected the connected subscription with the strongest quota urgency score."
+		return account, reason, nil
+	case state.RoutingModePreferred:
+		return m.choosePreferredAccount(ctx)
+	default:
+		return state.Account{}, RouteReason{}, fmt.Errorf("unsupported routing mode %q", routing.Mode)
+	}
+}
+
+func (m *Multiplexer) choosePreferredAccount(ctx context.Context) (state.Account, RouteReason, error) {
+	snapshots := m.accountSnapshots(ctx, false)
+	preferredID := m.store.PreferredAccountID()
+	if preferredID != "" {
+		if snapshot, ok := availableSnapshotByID(snapshots, preferredID); ok {
+			if account, exists := m.store.Account(snapshot.ID); exists {
+				return account, routeReasonForSnapshot(
+					snapshot,
+					state.RoutingModePreferred,
+					"Preferred subscription selected for this new task.",
+					"",
+					preferredID,
+				), nil
+			}
+		}
+	}
+	for _, snapshot := range snapshots {
+		if snapshot.PlanType != "pro" || !accountHasCapacity(snapshot) {
+			continue
+		}
+		account, exists := m.store.Account(snapshot.ID)
+		if !exists {
+			continue
+		}
+		if preferredID != snapshot.ID {
+			if err := m.store.SetPreferredAccountID(snapshot.ID); err == nil {
+				preferredID = snapshot.ID
+			}
+		}
+		return account, routeReasonForSnapshot(
+			snapshot,
+			state.RoutingModePreferred,
+			"Pro 20x is the preferred subscription for ordinary new tasks.",
+			"",
+			preferredID,
+		), nil
+	}
+	account, reason, err := m.chooseAccount(ctx)
+	if err != nil {
+		return state.Account{}, RouteReason{}, err
+	}
+	reason.Mode = state.RoutingModePreferred
+	reason.PreferredAccountID = preferredID
+	reason.Summary = "The preferred subscription was unavailable, so quota-aware Auto selected a connected fallback."
+	return account, reason, nil
+}
+
+func availableSnapshotByID(snapshots []AccountSnapshot, accountID string) (AccountSnapshot, bool) {
+	for _, snapshot := range snapshots {
+		if snapshot.ID == accountID && accountHasCapacity(snapshot) {
+			return snapshot, true
+		}
+	}
+	return AccountSnapshot{}, false
+}
+
+func routeReasonForSnapshot(
+	snapshot AccountSnapshot,
+	mode string,
+	summary string,
+	requestedAccountID string,
+	preferredAccountID string,
+) RouteReason {
+	reason := RouteReason{
+		Mode: mode, Summary: summary,
+		RequestedAccountID: requestedAccountID,
+		PreferredAccountID: preferredAccountID,
+		ThreadCount:        snapshot.ThreadCount,
+	}
+	weekly, short := longestAndShortestWindow(snapshot.RateLimits)
+	if weekly != nil {
+		value := weekly.UsedPercent
+		reason.WeeklyUsedPercent = &value
+		if weekly.ResetsAt != nil {
+			resetsAt := *weekly.ResetsAt
+			reason.WeeklyResetsAt = &resetsAt
+		}
+	}
+	if short != nil {
+		value := short.UsedPercent
+		reason.ShortUsedPercent = &value
+	}
+	return reason
 }
 
 func (m *Multiplexer) Accounts(ctx context.Context) []AccountSnapshot {
@@ -74,7 +207,9 @@ func (m *Multiplexer) accountSnapshots(ctx context.Context, includeProfile bool)
 			if err != nil {
 				snapshot = AccountSnapshot{
 					ID: account.ID, Label: account.Label, Enabled: account.Enabled,
-					Controller: account.Controller, CreatedAt: account.CreatedAt, Error: err.Error(),
+					Controller: account.Controller,
+					Preferred:  account.ID == m.store.PreferredAccountID(),
+					CreatedAt:  account.CreatedAt, Error: err.Error(),
 				}
 			}
 			results <- snapshot
@@ -116,12 +251,40 @@ func (m *Multiplexer) UpdateAccount(ctx context.Context, id string, label *strin
 	return m.accountSnapshot(ctx, id)
 }
 
+func (m *Multiplexer) UpdateAccountPreference(
+	ctx context.Context,
+	id string,
+	label *string,
+	enabled *bool,
+	preferred *bool,
+) (AccountSnapshot, error) {
+	if _, err := m.store.UpdateAccount(id, label, enabled); err != nil {
+		return AccountSnapshot{}, err
+	}
+	if preferred != nil {
+		target := ""
+		if *preferred {
+			target = id
+		} else if m.store.PreferredAccountID() != id {
+			target = m.store.PreferredAccountID()
+		}
+		if err := m.store.SetPreferredAccountID(target); err != nil {
+			return AccountSnapshot{}, err
+		}
+	}
+	return m.accountSnapshot(ctx, id)
+}
+
 func (m *Multiplexer) ThreadAccount(ctx context.Context, threadID string) (AccountSnapshot, error) {
 	accountID, ok := m.store.ThreadOwner(threadID)
 	if !ok {
 		return AccountSnapshot{}, fmt.Errorf("thread %q has no subscription assignment", threadID)
 	}
 	return m.accountSnapshotWithProfile(ctx, accountID, true)
+}
+
+func (m *Multiplexer) ThreadRouting(threadID string) (state.ThreadRoutingState, bool) {
+	return m.store.ThreadRouting(threadID)
 }
 
 func (m *Multiplexer) StartLogin(ctx context.Context, id, mode string) (json.RawMessage, error) {
@@ -175,8 +338,10 @@ func (m *Multiplexer) accountSnapshotWithProfile(ctx context.Context, accountID 
 	}
 	snapshot := AccountSnapshot{
 		ID: account.ID, Label: account.Label, Enabled: account.Enabled,
-		Controller: account.Controller, Connected: string(accountResult.Account) != "null" && len(accountResult.Account) > 0,
-		CreatedAt: account.CreatedAt, RawAccount: accountResult.Account,
+		Controller: account.Controller,
+		Preferred:  account.ID == m.store.PreferredAccountID(),
+		Connected:  string(accountResult.Account) != "null" && len(accountResult.Account) > 0,
+		CreatedAt:  account.CreatedAt, RawAccount: accountResult.Account,
 		ThreadCount: m.store.ThreadCounts()[account.ID],
 	}
 	if snapshot.Connected {
